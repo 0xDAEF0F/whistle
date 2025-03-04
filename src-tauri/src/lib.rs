@@ -2,9 +2,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{WavSpec, WavWriter};
 use std::fs::File;
 use std::io::BufWriter;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use tauri::tray::{TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Listener};
 
 struct AudioRecorder {
     stream: Option<cpal::Stream>,
@@ -48,8 +47,9 @@ impl AudioRecorder {
         let config = device.default_input_config().unwrap();
 
         // Generate a timestamp for the filename
-        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-        let filename = format!("recording_{}.wav", timestamp);
+        // let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+        // let filename = format!("recording_{}.wav", timestamp);
+        let filename = "recording.wav".to_string();
 
         // Configure WAV file
         let spec = WavSpec {
@@ -99,7 +99,7 @@ impl AudioRecorder {
 
     fn stop_recording_and_save(&mut self) {
         if !self.is_recording {
-            return; // Not recording
+            return;
         }
 
         self.is_recording = false;
@@ -133,27 +133,21 @@ impl AudioRecorder {
     }
 }
 
-// Create a command to start recording
-#[tauri::command]
-fn start_recording_command() {
-    thread_local! {
-        static RECORDER: std::cell::RefCell<AudioRecorder> = std::cell::RefCell::new(AudioRecorder::new());
-    }
-
-    RECORDER.with(|recorder| {
-        recorder.borrow_mut().start_recording();
-    });
+// Create a thread-local recorder
+thread_local! {
+    static RECORDER: std::cell::RefCell<AudioRecorder> = std::cell::RefCell::new(AudioRecorder::new());
 }
 
-// Create a command to stop recording
+// Create a command to toggle recording
 #[tauri::command]
-fn stop_recording_command() {
-    thread_local! {
-        static RECORDER: std::cell::RefCell<AudioRecorder> = std::cell::RefCell::new(AudioRecorder::new());
-    }
-
+fn toggle_recording() {
     RECORDER.with(|recorder| {
-        recorder.borrow_mut().stop_recording_and_save();
+        let mut recorder = recorder.borrow_mut();
+        if recorder.is_recording {
+            recorder.stop_recording_and_save();
+        } else {
+            recorder.start_recording();
+        }
     });
 }
 
@@ -164,21 +158,22 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let _tray = TrayIconBuilder::new()
+            app.listen("toggle-recording", |_| {
+                toggle_recording();
+            });
+
+            TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .build(app)?;
+
             Ok(())
         })
-        .on_tray_icon_event(|_app, event| {
+        .on_tray_icon_event(|app_handle, event| {
             if let TrayIconEvent::Click { .. } = event {
-                println!("starting to record");
-                start_recording_command();
+                app_handle.emit("toggle-recording", ()).unwrap();
             }
         })
-        .invoke_handler(tauri::generate_handler![
-            start_recording_command,
-            stop_recording_command
-        ])
+        .invoke_handler(tauri::generate_handler![toggle_recording])
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
