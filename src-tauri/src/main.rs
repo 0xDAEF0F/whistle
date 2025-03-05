@@ -5,11 +5,13 @@ use anyhow::Result;
 use cpal::Stream;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{WavSpec, WavWriter};
+use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Listener};
+use tauri::{Emitter, Listener, Manager};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tempfile::NamedTempFile;
 
 struct AudioRecorder {
@@ -184,11 +186,12 @@ pub async fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            let app_handle = app.app_handle().clone();
             let http_client = reqwest::Client::new();
 
-            let http_client = http_client.clone();
             app.listen("toggle-recording", move |_| {
                 let http_client = http_client.clone();
+                let app_handle = app_handle.clone();
                 tokio::spawn(async move {
                     if let Ok(bytes) = toggle_recording().await {
                         if bytes.is_empty() {
@@ -204,7 +207,17 @@ pub async fn main() {
 
                         let body = response.text().await.unwrap();
 
-                        println!("Response: {:?}", body);
+                        let json: Value =
+                            serde_json::from_str(&body).expect("Failed to parse JSON");
+
+                        let transcription = json["text"].as_str().expect("No text found");
+
+                        println!("Transcription text: {}", transcription);
+
+                        app_handle
+                            .clipboard()
+                            .write_text(transcription)
+                            .expect("Failed to write to clipboard");
                     }
                 });
             });
