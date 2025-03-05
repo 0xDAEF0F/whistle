@@ -22,3 +22,5 @@ cpal = "0.15.3"
 hound = "3.5.1"
 chrono = "0.4.40"
 tokio = { version = "1.43.0", features = ["full"] }
+reqwest = "0.12.12"
+anyhow = "1.0.97"

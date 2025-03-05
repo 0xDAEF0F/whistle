@@ -4,6 +4,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Stream;
 use hound::{WavSpec, WavWriter};
+use std::cell::RefCell;
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::{Arc, Mutex};
@@ -27,14 +28,15 @@ impl AudioRecorder {
 
     fn start_recording(&mut self) {
         if self.is_recording {
-            return; // Already recording
+            return;
         }
 
-        // Configure audio host and input device
-        let host = cpal::default_host();
-        let device = host.default_input_device().expect("No input device available");
+        let device = cpal::default_host()
+            .default_input_device()
+            .expect("No input device available");
         let config = device.default_input_config().unwrap();
 
+        // TODO: change this
         let filename = "recording.wav".to_string();
 
         // Configure WAV file
@@ -66,9 +68,9 @@ impl AudioRecorder {
                     {
                         for &sample in data {
                             // Apply gain (increase volume) - adjust the multiplier as needed
-                            let amplified_sample = sample * 2.5; // Increase gain
+                            let amplified_sample = sample * 3.0;
 
-                            // Clamp to avoid distortion
+                            // Avoids distortion
                             let clamped_sample = amplified_sample.clamp(-1.0, 1.0);
 
                             // Convert f32 to i16 for the WAV file
@@ -110,12 +112,12 @@ impl AudioRecorder {
 
 // Create a thread-local recorder
 thread_local! {
-    static RECORDER: std::cell::RefCell<AudioRecorder> = std::cell::RefCell::new(AudioRecorder::new());
+    static RECORDER: RefCell<AudioRecorder> = RefCell::new(AudioRecorder::new());
 }
 
 // Create a command to toggle recording
 #[tauri::command]
-fn toggle_recording() {
+async fn toggle_recording() {
     RECORDER.with(|recorder| {
         let mut recorder = recorder.borrow_mut();
         if recorder.is_recording {
