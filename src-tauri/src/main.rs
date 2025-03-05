@@ -2,39 +2,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::Stream;
 use hound::{WavSpec, WavWriter};
 use std::fs::File;
 use std::io::BufWriter;
-use tauri::tray::{TrayIconBuilder, TrayIconEvent};
+use std::sync::{Arc, Mutex};
+use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{Emitter, Listener};
 
 struct AudioRecorder {
-    stream: Option<cpal::Stream>,
-    writer: WavWriter<BufWriter<File>>,
+    stream: Option<Stream>,
+    writer: Option<WavWriter<BufWriter<File>>>,
     is_recording: bool,
 }
 
 impl AudioRecorder {
     fn new() -> Self {
-        // Configure audio host and input device
-        let host = cpal::default_host();
-        let device = host.default_input_device().expect("No input device available");
-        let config = device.default_input_config().unwrap();
-
-        // Configure WAV file
-        let spec = WavSpec {
-            channels: config.channels() as u16,
-            sample_rate: config.sample_rate().0,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        // Create WAV writer
-        let writer = WavWriter::create("output.wav", spec).unwrap();
-
         Self {
             stream: None,
-            writer,
+            writer: None,
             is_recording: false,
         }
     }
@@ -49,9 +35,6 @@ impl AudioRecorder {
         let device = host.default_input_device().expect("No input device available");
         let config = device.default_input_config().unwrap();
 
-        // Generate a timestamp for the filename
-        // let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
-        // let filename = format!("recording_{}.wav", timestamp);
         let filename = "recording.wav".to_string();
 
         // Configure WAV file
@@ -62,15 +45,14 @@ impl AudioRecorder {
             sample_format: hound::SampleFormat::Int,
         };
 
-        // Create a new writer
-        self.writer = WavWriter::create(&filename, spec).unwrap();
+        // Create a writer for the recording
+        let writer = WavWriter::create(&filename, spec).unwrap();
+        self.writer = Some(writer);
 
         // Create a writer for the callback
-        let writer_clone = std::sync::Arc::new(std::sync::Mutex::new(Some(
-            WavWriter::create(&filename, spec).unwrap(),
-        )));
+        let writer_for_callback =
+            Arc::new(Mutex::new(Some(WavWriter::create(&filename, spec).unwrap())));
 
-        let writer_for_callback = writer_clone.clone();
         self.is_recording = true;
 
         let err_fn = |err| eprintln!("an error occurred on the audio stream: {}", err);
@@ -79,12 +61,18 @@ impl AudioRecorder {
             .build_input_stream(
                 &config.into(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if let Some(mut writer_guard) =
+                    if let Some(writer_guard) =
                         writer_for_callback.lock().unwrap().as_mut()
                     {
                         for &sample in data {
+                            // Apply gain (increase volume) - adjust the multiplier as needed
+                            let amplified_sample = sample * 2.5; // Increase gain
+
+                            // Clamp to avoid distortion
+                            let clamped_sample = amplified_sample.clamp(-1.0, 1.0);
+
                             // Convert f32 to i16 for the WAV file
-                            let sample = (sample * 32767.0) as i16;
+                            let sample = (clamped_sample * 32767.0) as i16;
                             writer_guard.write_sample(sample).unwrap();
                         }
                     }
@@ -110,28 +98,12 @@ impl AudioRecorder {
         // Drop the stream to stop recording
         self.stream = None;
 
-        // Configure new writer for replacement
-        let host = cpal::default_host();
-        let device = host.default_input_device().expect("No input device available");
-        let config = device.default_input_config().unwrap();
-
-        let spec = WavSpec {
-            channels: config.channels() as u16,
-            sample_rate: config.sample_rate().0,
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        // Take ownership of writer using replace
-        let old_writer = std::mem::replace(
-            &mut self.writer,
-            WavWriter::create("output.wav", spec).unwrap(),
-        );
-
-        // Finalize the old writer
-        match old_writer.finalize() {
-            Ok(_) => println!("Recording saved"),
-            Err(e) => eprintln!("Error finalizing recording: {}", e),
+        // Finalize the writer if it exists
+        if let Some(writer) = self.writer.take() {
+            match writer.finalize() {
+                Ok(_) => println!("Recording saved"),
+                Err(e) => eprintln!("Error finalizing recording: {}", e),
+            }
         }
     }
 }
@@ -172,8 +144,10 @@ pub async fn main() {
             Ok(())
         })
         .on_tray_icon_event(|app_handle, event| {
-            if let TrayIconEvent::Click { .. } = event {
-                app_handle.emit("toggle-recording", ()).unwrap();
+            if let TrayIconEvent::Click { button_state, .. } = event {
+                if button_state == MouseButtonState::Up {
+                    app_handle.emit("toggle-recording", ()).unwrap();
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![toggle_recording])
