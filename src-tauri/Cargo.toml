@@ -3,7 +3,7 @@ name = "my-tauri-test"
 version = "0.1.0"
 description = "A Tauri App"
 authors = ["alex t. <aletapia@proton.me>"]
-edition = "2021"
+edition = "2024"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
