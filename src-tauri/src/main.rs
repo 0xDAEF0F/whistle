@@ -1,16 +1,17 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cpal::Stream;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{WavSpec, WavWriter};
-use serde_json::{Value, json};
+use serde::Deserialize;
 use std::cell::RefCell;
 use std::fs;
 use std::sync::{Arc, Mutex};
-use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{Emitter, Listener, Manager};
+use tauri::image::Image;
+use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tempfile::NamedTempFile;
 
@@ -37,6 +38,7 @@ impl AudioRecorder {
         if self.is_recording {
             return;
         }
+        log::debug!("Starting to record!");
 
         let device = cpal::default_host()
             .default_input_device()
@@ -89,6 +91,7 @@ impl AudioRecorder {
         if !self.is_recording {
             return None;
         }
+        log::debug!("Stopping recording");
 
         self.is_recording = false;
 
@@ -158,69 +161,21 @@ impl AudioRecorder {
     }
 }
 
-// Create a thread-local recorder
 thread_local! {
     static RECORDER: RefCell<AudioRecorder> = RefCell::new(AudioRecorder::new());
 }
 
-async fn toggle_recording() -> Result<Vec<u8>> {
-    let result = RECORDER.with(|recorder| {
-        let mut recorder = recorder.borrow_mut();
-        if recorder.is_recording {
-            let bytes = recorder
-                .stop_recording_and_get_bytes()
-                .expect("Failed to retrieve bytes");
-            Ok(bytes)
-        } else {
-            recorder.start_recording();
-            Ok(vec![])
-        }
-    });
-    result
-}
-
-#[tokio::main]
-pub async fn main() {
+pub fn main() {
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .format_timestamp(None)
+        .init();
     tauri::Builder::default()
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let app_handle = app.app_handle().clone();
-            let http_client = reqwest::Client::new();
-
-            app.listen("toggle-recording", move |_| {
-                let http_client = http_client.clone();
-                let app_handle = app_handle.clone();
-                tokio::spawn(async move {
-                    if let Ok(bytes) = toggle_recording().await {
-                        if bytes.is_empty() {
-                            return;
-                        }
-                        let response = http_client
-                            .post("http://localhost:3000/upload-wav")
-                            .header("Content-Type", "audio/wav")
-                            .body(bytes)
-                            .send()
-                            .await
-                            .unwrap();
-
-                        let body = response.text().await.unwrap();
-
-                        let json: Value =
-                            serde_json::from_str(&body).expect("Failed to parse JSON");
-
-                        let transcription = json["text"].as_str().expect("No text found");
-
-                        println!("Transcription text: {}", transcription);
-
-                        app_handle
-                            .clipboard()
-                            .write_text(transcription)
-                            .expect("Failed to write to clipboard");
-                    }
-                });
-            });
+            app.manage(reqwest::Client::new());
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -229,13 +184,76 @@ pub async fn main() {
             Ok(())
         })
         .on_tray_icon_event(|app_handle, event| {
-            if let TrayIconEvent::Click { button_state, .. } = event {
-                if button_state == MouseButtonState::Up {
-                    app_handle.emit("toggle-recording", ()).unwrap();
-                }
+            if let Err(e) = tray_event_handler(app_handle, event) {
+                log::error!("Error handling tray event: {}", e);
             }
         })
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn tray_event_handler(app_handle: &AppHandle, event: TrayIconEvent) -> Result<()> {
+    if let TrayIconEvent::Click {
+        id: tray_id,
+        button_state: MouseButtonState::Down,
+        ..
+    } = event
+    {
+        let is_recording = RECORDER.with(|recorder| recorder.borrow().is_recording);
+        match is_recording {
+            false => {
+                _ = RECORDER.with(|recorder| {
+                    let tray_icon =
+                        app_handle.tray_by_id(&tray_id).with_context(|| {
+                            format!("could not get tray_icon from tray_id: {tray_id:?}")
+                        })?;
+
+                    recorder.borrow_mut().start_recording();
+                    tray_icon
+                        .set_icon(Some(Image::from_path("icons/recording-icon.png")?))?;
+
+                    anyhow::Ok(())
+                });
+            }
+            true => {
+                let recording_bytes = RECORDER.with(|recorder| {
+                    let mut recorder = recorder.borrow_mut();
+                    recorder
+                        .stop_recording_and_get_bytes()
+                        .context("Failed to stop recording")
+                })?;
+                let tray_icon = app_handle.tray_by_id(&tray_id).with_context(|| {
+                    format!("could not get tray_icon from tray_id: {tray_id:?}")
+                })?;
+                tray_icon
+                    .set_icon(Some(Image::from_path("icons/transcribing-icon.png")?))?;
+
+                #[derive(Deserialize)]
+                struct Response {
+                    text: String,
+                }
+
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    let response = app_handle
+                        .state::<reqwest::Client>()
+                        .post("http://localhost:3000/upload-wav")
+                        .header("Content-Type", "audio/wav")
+                        .body(recording_bytes)
+                        .send()
+                        .await?;
+                    let response: Response =
+                        serde_json::from_str(&response.text().await?)?;
+
+                    app_handle.clipboard().write_text(response.text)?;
+                    tray_icon.set_icon(Some(Image::from_path("icons/icon.png")?))?;
+
+                    anyhow::Ok(())
+                });
+            }
+        }
+    }
+
+    Ok(())
 }
