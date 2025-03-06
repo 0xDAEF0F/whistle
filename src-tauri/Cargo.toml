@@ -1,7 +1,7 @@
 [package]
-name = "my-tauri-test"
+name = "whisper-app"
 version = "0.1.0"
-description = "A Tauri App"
+description = "A simple app to transcribe audio to text"
 authors = ["alex t. <aletapia@proton.me>"]
 edition = "2024"
 

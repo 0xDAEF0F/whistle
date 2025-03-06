@@ -2481,27 +2481,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "my-tauri-test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "cpal",
- "env_logger",
- "hound",
- "log",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-opener",
- "tempfile",
- "tokio",
-]
-
-[[package]]
 name = "native-tls"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5319,6 +5298,27 @@ name = "weezl"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53a85b86a771b1c87058196170769dd264f66c0782acf1ae6cc51bfd64b39082"
+
+[[package]]
+name = "whisper-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "cpal",
+ "env_logger",
+ "hound",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-opener",
+ "tempfile",
+ "tokio",
+]
 
 [[package]]
 name = "winapi"

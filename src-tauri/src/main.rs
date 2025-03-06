@@ -1,17 +1,23 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod constants;
 use anyhow::{Context, Result};
-use cpal::Stream;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use constants::API_URL;
+use cpal::{
+    Stream,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+};
 use hound::{WavSpec, WavWriter};
 use serde::Deserialize;
-use std::cell::RefCell;
-use std::fs;
-use std::sync::{Arc, Mutex};
-use tauri::image::Image;
-use tauri::tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId};
-use tauri::{AppHandle, Manager};
+use std::{
+    cell::RefCell,
+    sync::{Arc, Mutex},
+};
+use tauri::{
+    AppHandle, Manager, State,
+    image::Image,
+    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tempfile::NamedTempFile;
 
@@ -148,7 +154,7 @@ impl AudioRecorder {
         }
 
         // Read the file back into memory
-        match fs::read(&temp_path) {
+        match std::fs::read(&temp_path) {
             Ok(bytes) => {
                 println!("Recording captured ({} bytes)", bytes.len());
                 Some(bytes)
@@ -236,19 +242,44 @@ fn tray_event_handler(app_handle: &AppHandle, event: TrayIconEvent) -> Result<()
 
                 let app_handle = app_handle.clone();
                 tauri::async_runtime::spawn(async move {
-                    let response = app_handle
-                        .state::<reqwest::Client>()
-                        .post("http://localhost:3000/upload-wav")
-                        .header("Content-Type", "audio/wav")
-                        .body(recording_bytes)
-                        .send()
-                        .await?;
-                    let response: Response =
-                        serde_json::from_str(&response.text().await?)?;
+                    async fn call_api_and_retrieve_transcription(
+                        http_client: State<'_, reqwest::Client>,
+                        recording: Vec<u8>,
+                    ) -> Result<String> {
+                        let res = http_client
+                            .post(API_URL)
+                            .header("Content-Type", "audio/wav")
+                            .body(recording)
+                            .send()
+                            .await?;
 
-                    app_handle.clipboard().write_text(response.text)?;
-                    tray_icon.set_icon(Some(Image::from_path("icons/icon.png")?))?;
+                        let response: Response =
+                            serde_json::from_str(&res.text().await?)?;
 
+                        Ok(response.text)
+                    }
+
+                    let transcription = call_api_and_retrieve_transcription(
+                        app_handle.state::<reqwest::Client>(),
+                        recording_bytes,
+                    )
+                    .await;
+
+                    match transcription {
+                        std::result::Result::Ok(text) => {
+                            log::info!("Transcription success: {}", text);
+                            app_handle.clipboard().write_text(text)?;
+                            tray_icon
+                                .set_icon(Some(Image::from_path("icons/icon.png")?))?;
+                        }
+                        Err(e) => {
+                            log::error!("Error writing to clipboard: {}", e);
+                            tray_icon
+                                .set_icon(Some(Image::from_path("icons/icon.png")?))?;
+                            let default_icon = app_handle.default_window_icon().unwrap();
+                            tray_icon.set_icon(Some(default_icon.clone()))?;
+                        }
+                    }
                     anyhow::Ok(())
                 });
             }
