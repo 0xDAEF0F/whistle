@@ -7,16 +7,19 @@ use cpal::{
     Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
+use device_query::{DeviceEvents, DeviceEventsHandler, DeviceState, Keycode};
 use hound::{WavSpec, WavWriter};
 use serde::Deserialize;
 use std::{
     cell::RefCell,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
+    time::Duration,
 };
 use tauri::{
     AppHandle, Manager, State,
+    async_runtime::spawn,
     image::Image,
-    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tempfile::NamedTempFile;
@@ -183,9 +186,14 @@ pub fn main() {
 
             app.manage(reqwest::Client::new());
 
-            TrayIconBuilder::new()
+            let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .build(app)?;
+
+            let app_handle = app.handle().clone();
+            let tray_id = tray_icon.id().clone();
+
+            _ = spawn(key_logger(app_handle, tray_id));
 
             Ok(())
         })
@@ -197,6 +205,137 @@ pub fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
+    let device_state = DeviceEventsHandler::new(Duration::from_millis(10))
+        .expect("Failed to start event loop");
+
+    let seq_of_keys = Arc::new(Mutex::new((false, false)));
+    let seq_of_keys_ = Arc::clone(&seq_of_keys);
+
+    // Handle key down events
+    let _on_key_down_cb = device_state.on_key_down(move |&key| {
+        if key == Keycode::Command {
+            seq_of_keys.lock().unwrap().0 = true;
+            log::info!("command key pressed");
+            return;
+        }
+        if key == Keycode::LOption || key == Keycode::ROption {
+            seq_of_keys.lock().unwrap().1 = true;
+            log::info!("option key pressed");
+            return;
+        }
+
+        let (cmd_pressed, option_pressed) = *seq_of_keys.lock().unwrap();
+        if cmd_pressed && option_pressed && key == Keycode::R {
+            log::info!("should toggle recording");
+
+            let is_recording = RECORDER.with(|recorder| recorder.borrow().is_recording);
+            if !is_recording {
+                _ = RECORDER.with(|recorder| {
+                    let tray_icon =
+                        app_handle.tray_by_id(&tray_id).with_context(|| {
+                            format!("could not get tray_icon from tray_id: {tray_id:?}")
+                        })?;
+
+                    let _ = std::process::Command::new("osascript")
+                        .args(["-e", "tell application \"Spotify\" to pause"])
+                        .output();
+
+                    recorder.borrow_mut().start_recording();
+
+                    tray_icon
+                        .set_icon(Some(Image::from_path("icons/recording-icon.png")?))?;
+
+                    anyhow::Ok(())
+                });
+            } else {
+                let recording_bytes = RECORDER
+                    .with(|recorder| {
+                        let mut recorder = recorder.borrow_mut();
+                        recorder
+                            .stop_recording_and_get_bytes()
+                            .context("Failed to stop recording")
+                    })
+                    .unwrap();
+                let tray_icon = app_handle
+                    .tray_by_id(&tray_id)
+                    .with_context(|| {
+                        format!("could not get tray_icon from tray_id: {tray_id:?}")
+                    })
+                    .unwrap();
+                _ = tray_icon.set_icon(Some(
+                    Image::from_path("icons/transcribing-icon.png").unwrap(),
+                ));
+
+                #[derive(Deserialize)]
+                struct Response {
+                    text: String,
+                }
+
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    async fn call_api_and_retrieve_transcription(
+                        http_client: State<'_, reqwest::Client>,
+                        recording: Vec<u8>,
+                    ) -> Result<String> {
+                        let res = http_client
+                            .post(API_URL)
+                            .header("Content-Type", "audio/wav")
+                            .body(recording)
+                            .send()
+                            .await?;
+
+                        let response: Response =
+                            serde_json::from_str(&res.text().await?)?;
+
+                        Ok(response.text)
+                    }
+
+                    let transcription = call_api_and_retrieve_transcription(
+                        app_handle.state::<reqwest::Client>(),
+                        recording_bytes,
+                    )
+                    .await;
+
+                    match transcription {
+                        std::result::Result::Ok(text) => {
+                            log::info!("Transcription success: {}", text);
+                            app_handle.clipboard().write_text(text)?;
+                            tray_icon
+                                .set_icon(Some(Image::from_path("icons/icon.png")?))?;
+                        }
+                        Err(e) => {
+                            log::error!("Error writing to clipboard: {}", e);
+                            tray_icon
+                                .set_icon(Some(Image::from_path("icons/icon.png")?))?;
+                            let default_icon = app_handle.default_window_icon().unwrap();
+                            tray_icon.set_icon(Some(default_icon.clone()))?;
+                        }
+                    }
+                    anyhow::Ok(())
+                });
+            }
+            *seq_of_keys.lock().unwrap() = (false, false);
+        }
+    });
+
+    // Handle key up events
+    let _on_key_up_cb = device_state.on_key_up(move |&key| {
+        if key == Keycode::Command {
+            seq_of_keys_.lock().unwrap().0 = false;
+            log::info!("command key released");
+        }
+        if key == Keycode::LOption || key == Keycode::ROption {
+            seq_of_keys_.lock().unwrap().1 = false;
+            log::info!("option key released");
+        }
+    });
+
+    loop {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 fn tray_event_handler(app_handle: &AppHandle, event: TrayIconEvent) -> Result<()> {
@@ -214,6 +353,11 @@ fn tray_event_handler(app_handle: &AppHandle, event: TrayIconEvent) -> Result<()
                         app_handle.tray_by_id(&tray_id).with_context(|| {
                             format!("could not get tray_icon from tray_id: {tray_id:?}")
                         })?;
+
+                    // TODO: can we check if Spotify is running first?
+                    let _ = std::process::Command::new("osascript")
+                        .args(["-e", "tell application \"Spotify\" to pause"])
+                        .output();
 
                     recorder.borrow_mut().start_recording();
                     tray_icon
