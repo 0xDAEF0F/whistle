@@ -2,19 +2,20 @@
 
 mod constants;
 use anyhow::{Context, Result};
-use chrono::naive;
+use colored::*;
 use constants::API_URL;
 use cpal::{
     Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-use device_query::{DeviceEvents, DeviceEventsHandler, DeviceState, Keycode};
+use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
+use env_logger::WriteStyle;
 use hound::{WavSpec, WavWriter};
 use serde::Deserialize;
 use std::{
     cell::RefCell,
     collections::HashSet,
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 use tauri::{
@@ -49,7 +50,8 @@ impl AudioRecorder {
         if self.is_recording {
             return;
         }
-        log::debug!("Starting to record!");
+
+        log::debug!("'AudioRecorder' starting to record!");
 
         let device = cpal::default_host()
             .default_input_device()
@@ -67,6 +69,10 @@ impl AudioRecorder {
         let samples_for_callback = self.samples.clone();
 
         self.is_recording = true;
+        log::debug!(
+            "'AudioRecorder' is recording: {} (should be true)",
+            self.is_recording
+        );
 
         let err_fn = |err| eprintln!("an error occurred on the audio stream: {}", err);
 
@@ -94,17 +100,20 @@ impl AudioRecorder {
 
         stream.play().expect("Failed to start audio stream");
         self.stream = Some(stream);
-
-        println!("Recording started");
     }
 
     fn stop_recording_and_get_bytes(&mut self) -> Option<Vec<u8>> {
         if !self.is_recording {
             return None;
         }
-        log::debug!("Stopping recording");
+
+        log::debug!("'AudioRecorder' stopping recording");
 
         self.is_recording = false;
+        log::debug!(
+            "'AudioRecorder' is recording: {} (should be false)",
+            self.is_recording
+        );
 
         // Drop the stream to stop recording
         self.stream = None;
@@ -172,32 +181,6 @@ impl AudioRecorder {
     }
 }
 
-// #[derive(Clone, PartialEq, Eq, Default, Debug)]
-// pub struct KeyboardShortcut {
-//     modifiers: HashSet<Keycode>,
-//     action_key: Option<Keycode>,
-// }
-
-// impl KeyboardShortcut {
-//     pub fn new() -> Self {
-//         Self::default()
-//     }
-
-//     pub fn add_key(&mut self, key: Keycode) {
-//         match key {
-//             Keycode::Command | Keycode::LOption | Keycode::ROption => {
-//                 self.modifiers.insert(key);
-//             }
-//             _ => self.action_key = Some(key),
-//         }
-//     }
-// }
-
-// pub enum ShortcutAction {
-//     ToggleRecording,
-//     ToggleRecordingSpanish,
-// }
-
 thread_local! {
     static RECORDER: RefCell<AudioRecorder> = RefCell::new(AudioRecorder::new());
 }
@@ -205,6 +188,7 @@ thread_local! {
 pub fn main() {
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
+        .write_style(WriteStyle::Always)
         .format_timestamp(None)
         .init();
     tauri::Builder::default()
@@ -232,7 +216,16 @@ pub fn main() {
                 ..
             } = event
             {
-                spawn(toggle_recording(app_handle.app_handle().clone(), tray_id));
+                log::info!("Tray icon clicked at: {}", chrono::Local::now());
+                let app_handle = app_handle.clone();
+                let tray_id = tray_id.clone();
+                spawn(async move {
+                    if let Err(e) =
+                        toggle_recording(app_handle, tray_id, Some("English")).await
+                    {
+                        log::error!("Error toggling recording on tray icon click: {}", e);
+                    }
+                });
             }
         })
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -244,45 +237,51 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
     let device_state = DeviceEventsHandler::new(Duration::from_millis(10))
         .expect("Failed to start event loop");
 
-    let seq_of_keys = Arc::new(Mutex::new((false, false)));
-    let seq_of_keys_ = Arc::clone(&seq_of_keys);
+    let modifiers_held = Arc::new(Mutex::new(HashSet::new()));
+    let modifiers_held_ = Arc::clone(&modifiers_held);
 
     // Handle key down events
-    let _on_key_down_cb = device_state.on_key_down(move |&key| {
-        if key == Keycode::Command {
-            seq_of_keys.lock().unwrap().0 = true;
-            log::info!("command key pressed");
-            return;
-        }
-        if key == Keycode::LOption || key == Keycode::ROption {
-            seq_of_keys.lock().unwrap().1 = true;
-            log::info!("option key pressed");
+    let _key_down_cb = device_state.on_key_down(move |&key| {
+        if key == Keycode::Command || key == Keycode::LOption || key == Keycode::ROption {
+            log::debug!("Modifier key pressed: {}", key);
+            modifiers_held.lock().unwrap().insert(key);
             return;
         }
 
-        let (cmd_pressed, option_pressed) = *seq_of_keys.lock().unwrap();
-        if cmd_pressed && option_pressed && key == Keycode::R {
-            log::info!("should toggle recording");
-            let app_handle = app_handle.clone();
-            let tray_id = tray_id.clone();
-            spawn(async move {
-                if let Err(e) = toggle_recording(app_handle, tray_id).await {
-                    log::error!("Error toggling recording: {}", e);
-                }
-            });
-            *seq_of_keys.lock().unwrap() = (false, false);
+        {
+            let modifiers_held_ = modifiers_held.lock().unwrap();
+            if !(modifiers_held_.contains(&Keycode::Command)
+                && (modifiers_held_.contains(&Keycode::LOption)
+                    || modifiers_held_.contains(&Keycode::ROption)))
+            {
+                log::debug!("Key pressed '{key}' while modifiers not held. Returning...");
+                return;
+            }
+        }
+
+        if key == Keycode::R {
+            log::info!(
+                "'R' key pressed while modifiers are held. {} recording...",
+                "Toggling".red()
+            );
+            spawn(toggle_recording(app_handle.clone(), tray_id.clone(), Some("English")));
+            return;
+        }
+
+        if key == Keycode::S {
+            log::info!(
+                "'S' key pressed while modifiers are held. {} recording (Spanish)...",
+                "Toggling".bright_red()
+            );
+            spawn(toggle_recording(app_handle.clone(), tray_id.clone(), Some("Spanish")));
         }
     });
 
     // Handle key up events
-    let _on_key_up_cb = device_state.on_key_up(move |&key| {
-        if key == Keycode::Command {
-            seq_of_keys_.lock().unwrap().0 = false;
-            log::info!("command key released");
-        }
-        if key == Keycode::LOption || key == Keycode::ROption {
-            seq_of_keys_.lock().unwrap().1 = false;
-            log::info!("option key released");
+    let _key_up_cb = device_state.on_key_up(move |&key| {
+        if key == Keycode::Command || key == Keycode::LOption || key == Keycode::ROption {
+            log::debug!("modifier key released: {}", key);
+            modifiers_held_.lock().unwrap().remove(&key);
         }
     });
 
@@ -296,41 +295,54 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
 /// - Pauses Spotify if it is playing.
 /// - Starts recording or stops recording.
 /// - Calls the API to transcribe the recording.
-async fn toggle_recording(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
+async fn toggle_recording(
+    app_handle: AppHandle,
+    tray_id: TrayIconId,
+    language: Option<&str>,
+) -> Result<()> {
     let tray_icon = app_handle
         .tray_by_id(&tray_id)
         .with_context(|| format!("could not get tray_icon from tray_id: {tray_id:?}"))?;
 
-    let is_recording = RECORDER.with_borrow(|recorder| recorder.is_recording);
+    enum RecordingResult {
+        RecordingResult(Vec<u8>),
+        StartRecording,
+    }
 
-    if !is_recording {
-        return RECORDER.with_borrow_mut(|recorder| {
+    let recording_result = RECORDER.with_borrow_mut(|recorder| {
+        log::info!("Recorder is recording: {}", recorder.is_recording);
+
+        if !recorder.is_recording {
             _ = std::process::Command::new("osascript")
                 .args(["-e", "tell application \"Spotify\" to pause"])
                 .output();
 
             recorder.start_recording();
-
             tray_icon.set_icon(Some(Image::from_path("icons/recording-icon.png")?))?;
+            return anyhow::Ok(RecordingResult::StartRecording);
+        }
 
-            Ok(())
-        });
-    }
+        let recording_bytes = recorder
+            .stop_recording_and_get_bytes()
+            .context("Failed to stop recording")?;
 
-    let recording_bytes = RECORDER
-        .with_borrow_mut(|recorder| recorder.stop_recording_and_get_bytes())
-        .context("Failed to stop recording")?;
+        Ok(RecordingResult::RecordingResult(recording_bytes))
+    })?;
+
+    let RecordingResult::RecordingResult(recording_bytes) = recording_result else {
+        return Ok(());
+    };
 
     let transcription = call_api_and_retrieve_transcription(
         app_handle.state::<reqwest::Client>(),
         recording_bytes,
-        None,
+        language,
     )
     .await;
 
     match transcription {
         Ok(text) => {
-            log::info!("Transcription success: {}", text);
+            log::info!("Transcription: {}", text.blue());
             app_handle.clipboard().write_text(text)?;
             tray_icon.set_icon(Some(Image::from_path("icons/icon.png")?))?;
         }
@@ -356,7 +368,7 @@ async fn call_api_and_retrieve_transcription(
     let res = http_client
         .post(API_URL)
         .header("Content-Type", "audio/wav")
-        .query(&["lang", lang])
+        .query(&[("lang", lang), ("model", "small")])
         .body(recording)
         .send()
         .await?;
