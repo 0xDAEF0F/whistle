@@ -11,6 +11,7 @@ use cpal::{
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
 use env_logger::WriteStyle;
 use hound::{WavSpec, WavWriter};
+use reqwest::Client;
 use serde::Deserialize;
 use std::{
     cell::RefCell,
@@ -19,7 +20,7 @@ use std::{
     time::Duration,
 };
 use tauri::{
-    AppHandle, Manager, State,
+    AppHandle,
     async_runtime::spawn,
     image::Image,
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId},
@@ -196,8 +197,6 @@ pub fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            app.manage(reqwest::Client::new());
-
             let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .build(app)?;
@@ -217,15 +216,42 @@ pub fn main() {
             } = event
             {
                 log::info!("Tray icon clicked at: {}", chrono::Local::now());
-                let app_handle = app_handle.clone();
                 let tray_id = tray_id.clone();
-                spawn(async move {
-                    if let Err(e) =
-                        toggle_recording(app_handle, tray_id, Some("English")).await
-                    {
-                        log::error!("Error toggling recording on tray icon click: {}", e);
-                    }
-                });
+                let recording_result = toggle_recording(app_handle.clone(), tray_id)
+                    .expect("Failed to toggle recording");
+
+                if let RecordingResult::RecordingResult(recording_bytes) =
+                    recording_result
+                {
+                    let app_handle = app_handle.clone();
+                    spawn(async move {
+                        let text = call_api_and_retrieve_transcription(
+                            reqwest::Client::new(),
+                            recording_bytes,
+                            Language::English,
+                        )
+                        .await
+                        .map_err(|e| {
+                            log::error!("Failed to call API: {}", e);
+                        })
+                        .unwrap();
+
+                        log::info!(
+                            "Writing text to clipboard: {}",
+                            text.to_string().yellow()
+                        );
+
+                        app_handle
+                            .clipboard()
+                            .write_text(text)
+                            .map_err(|e| {
+                                log::error!("Failed to write to clipboard: {}", e);
+                            })
+                            .unwrap();
+
+                        log::trace!("Successfully wrote text to clipboard");
+                    });
+                }
             }
         })
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -259,22 +285,61 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
             }
         }
 
-        if key == Keycode::R {
-            log::info!(
-                "'R' key pressed while modifiers are held. {} recording...",
-                "Toggling".red()
-            );
-            spawn(toggle_recording(app_handle.clone(), tray_id.clone(), Some("English")));
+        if key != Keycode::R && key != Keycode::S {
             return;
         }
 
-        if key == Keycode::S {
-            log::info!(
-                "'S' key pressed while modifiers are held. {} recording (Spanish)...",
-                "Toggling".bright_red()
-            );
-            spawn(toggle_recording(app_handle.clone(), tray_id.clone(), Some("Spanish")));
-        }
+        log::info!(
+            "'{}' pressed while modifiers held. {} recording...",
+            key.to_string().red(),
+            "Toggling".red()
+        );
+
+        let rec_res =
+            toggle_recording(app_handle.clone(), tray_id.clone()).map_err(|e| {
+                log::error!("Failed to toggle recording: {}", e);
+            });
+        let Ok(RecordingResult::RecordingResult(recording_bytes)) = rec_res else {
+            return;
+        };
+
+        log::debug!(
+            "Sending recording to API. Bytes: {}",
+            recording_bytes.len().to_string().yellow()
+        );
+
+        let language = if key == Keycode::S {
+            Language::Spanish
+        } else {
+            Language::English
+        };
+
+        // Do not block the UI thread.
+        let app_handle = app_handle.clone();
+        spawn(async move {
+            let text = call_api_and_retrieve_transcription(
+                reqwest::Client::new(),
+                recording_bytes,
+                language,
+            )
+            .await
+            .map_err(|e| {
+                log::error!("Failed to call API: {}", e);
+            })
+            .unwrap();
+
+            log::info!("Writing text to clipboard: {}", text.to_string().yellow());
+
+            app_handle
+                .clipboard()
+                .write_text(text)
+                .map_err(|e| {
+                    log::error!("Failed to write to clipboard: {}", e);
+                })
+                .unwrap();
+
+            log::trace!("Successfully wrote text to clipboard");
+        });
     });
 
     // Handle key up events
@@ -290,24 +355,22 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
     }
 }
 
+enum RecordingResult {
+    RecordingResult(Vec<u8>),
+    StartRecording,
+}
+
 /// This function:
 /// - Changes the tray icon.
 /// - Pauses Spotify if it is playing.
 /// - Starts recording or stops recording.
-/// - Calls the API to transcribe the recording.
-async fn toggle_recording(
+fn toggle_recording(
     app_handle: AppHandle,
     tray_id: TrayIconId,
-    language: Option<&str>,
-) -> Result<()> {
+) -> Result<RecordingResult> {
     let tray_icon = app_handle
         .tray_by_id(&tray_id)
         .with_context(|| format!("could not get tray_icon from tray_id: {tray_id:?}"))?;
-
-    enum RecordingResult {
-        RecordingResult(Vec<u8>),
-        StartRecording,
-    }
 
     let recording_result = RECORDER.with_borrow_mut(|recorder| {
         log::info!("Recorder is recording: {}", recorder.is_recording);
@@ -329,46 +392,32 @@ async fn toggle_recording(
         Ok(RecordingResult::RecordingResult(recording_bytes))
     })?;
 
-    let RecordingResult::RecordingResult(recording_bytes) = recording_result else {
-        return Ok(());
-    };
+    Ok(recording_result)
+}
 
-    let transcription = call_api_and_retrieve_transcription(
-        app_handle.state::<reqwest::Client>(),
-        recording_bytes,
-        language,
-    )
-    .await;
+#[derive(Default, Debug)]
+enum Language {
+    #[default]
+    English,
+    Spanish,
+}
 
-    match transcription {
-        Ok(text) => {
-            log::info!("Transcription: {}", text.blue());
-            app_handle.clipboard().write_text(text)?;
-            tray_icon.set_icon(Some(Image::from_path("icons/icon.png")?))?;
-        }
-        Err(e) => {
-            log::error!("Error writing to clipboard: {}", e);
-            tray_icon.set_icon(Some(Image::from_path("icons/icon.png")?))?;
-            let default_icon = app_handle.default_window_icon().unwrap();
-            tray_icon.set_icon(Some(default_icon.clone()))?;
-        }
+impl std::fmt::Display for Language {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
-    Ok(())
 }
 
 async fn call_api_and_retrieve_transcription(
-    http_client: State<'_, reqwest::Client>,
+    http_client: Client,
     recording: Vec<u8>,
-    language: Option<&str>, // English or Spanish (default English)
+    language: Language,
 ) -> Result<String> {
-    let lang = language.unwrap_or("English");
-    if lang != "English" && lang != "Spanish" {
-        anyhow::bail!("Invalid language!");
-    }
+    let lang = language.to_string();
     let res = http_client
         .post(API_URL)
         .header("Content-Type", "audio/wav")
-        .query(&[("lang", lang), ("model", "small")])
+        .query(&[("lang", lang.as_str()), ("model", "small")])
         .body(recording)
         .send()
         .await?;
