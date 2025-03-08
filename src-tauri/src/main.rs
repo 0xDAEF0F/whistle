@@ -321,10 +321,12 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
 
         {
             let modifiers_held_ = modifiers_held.lock().unwrap();
-            if !(modifiers_held_.contains(&Keycode::Command)
-                && (modifiers_held_.contains(&Keycode::LControl)
-                    || modifiers_held_.contains(&Keycode::RControl)))
-            {
+            let cmd_ctrl_held = {
+                modifiers_held_.contains(&Keycode::Command)
+                    && (modifiers_held_.contains(&Keycode::LControl)
+                        || modifiers_held_.contains(&Keycode::RControl))
+            };
+            if !cmd_ctrl_held && key != Keycode::F6 {
                 log::debug!(
                     "Key pressed {} while modifiers not held. Returning.",
                     format!("'{key}'").blue()
@@ -333,7 +335,7 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
             }
         }
 
-        if key != Keycode::R && key != Keycode::S {
+        if key != Keycode::R && key != Keycode::S && key != Keycode::F6 {
             return;
         }
 
@@ -404,9 +406,10 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
 
     // Handle key up events
     let _key_up_cb = device_state.on_key_up(move |&key| {
-        if key == Keycode::Command || key == Keycode::LOption || key == Keycode::ROption {
+        modifiers_held_.lock().unwrap().remove(&key);
+        if key == Keycode::Command || key == Keycode::LControl || key == Keycode::RControl
+        {
             log::debug!("modifier key released: {}", format!("'{key}'").blue());
-            modifiers_held_.lock().unwrap().remove(&key);
         }
     });
 
@@ -478,6 +481,7 @@ async fn call_api_and_retrieve_transcription(
     recording: Vec<u8>,
     language: Language,
 ) -> Result<String> {
+    log::debug!("Whisper language: {language:?}",);
     let lang = language.to_string();
     let res = http_client
         .post(API_URL)
