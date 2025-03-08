@@ -216,14 +216,15 @@ pub fn main() {
             } = event
             {
                 log::info!("Tray icon clicked at: {}", chrono::Local::now());
-                let tray_id = tray_id.clone();
-                let recording_result = toggle_recording(app_handle.clone(), tray_id)
-                    .expect("Failed to toggle recording");
+                let recording_result =
+                    toggle_recording(app_handle.clone(), tray_id.clone())
+                        .expect("Failed to toggle recording");
 
                 if let RecordingResult::RecordingResult(recording_bytes) =
                     recording_result
                 {
                     let app_handle = app_handle.clone();
+                    let tray_id = tray_id.clone();
                     spawn(async move {
                         let text = call_api_and_retrieve_transcription(
                             reqwest::Client::new(),
@@ -248,8 +249,12 @@ pub fn main() {
                                 log::error!("Failed to write to clipboard: {}", e);
                             })
                             .unwrap();
-
                         log::trace!("Successfully wrote text to clipboard");
+
+                        _ = app_handle.tray_by_id(&tray_id).unwrap().set_icon(Some(
+                            app_handle.default_window_icon().unwrap().clone(),
+                        ));
+                        log::trace!("Successfully set tray icon to default");
                     });
                 }
             }
@@ -316,6 +321,7 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
 
         // Do not block the UI thread.
         let app_handle = app_handle.clone();
+        let tray_id = tray_id.clone();
         spawn(async move {
             let text = call_api_and_retrieve_transcription(
                 reqwest::Client::new(),
@@ -339,6 +345,11 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
                 .unwrap();
 
             log::trace!("Successfully wrote text to clipboard");
+
+            _ = app_handle
+                .tray_by_id(&tray_id)
+                .unwrap()
+                .set_icon(Some(app_handle.default_window_icon().unwrap().clone()));
         });
     });
 
@@ -388,6 +399,8 @@ fn toggle_recording(
         let recording_bytes = recorder
             .stop_recording_and_get_bytes()
             .context("Failed to stop recording")?;
+
+        tray_icon.set_icon(Some(Image::from_path("icons/transcribing-icon.png")?))?;
 
         Ok(RecordingResult::RecordingResult(recording_bytes))
     })?;
