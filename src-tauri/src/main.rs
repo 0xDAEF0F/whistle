@@ -9,6 +9,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
+use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use env_logger::WriteStyle;
 use hound::{WavSpec, WavWriter};
 use reqwest::Client;
@@ -20,13 +21,14 @@ use std::{
     time::Duration,
 };
 use tauri::{
-    AppHandle,
+    AppHandle, Manager,
     async_runtime::spawn,
     image::Image,
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tempfile::NamedTempFile;
+use tokio::sync::mpsc;
 
 struct AudioRecorder {
     stream: Option<Stream>,
@@ -75,8 +77,6 @@ impl AudioRecorder {
             self.is_recording
         );
 
-        let err_fn = |err| eprintln!("an error occurred on the audio stream: {}", err);
-
         let stream = device
             .build_input_stream(
                 &config.into(),
@@ -94,7 +94,7 @@ impl AudioRecorder {
                         samples.push(sample);
                     }
                 },
-                err_fn,
+                |err| log::error!("An error occurred on the audio stream: {}", err),
                 None,
             )
             .expect("Failed to build input stream");
@@ -171,11 +171,13 @@ impl AudioRecorder {
         // Read the file back into memory
         match std::fs::read(&temp_path) {
             Ok(bytes) => {
-                println!("Recording captured ({} bytes)", bytes.len());
+                let size_mb = bytes.len() as f64 / 1_048_576.0;
+                let formatted_size = format!("{:.2} MB", size_mb);
+                log::info!("Recording captured: {}", formatted_size.red());
                 Some(bytes)
             }
             Err(e) => {
-                eprintln!("Error reading WAV file: {}", e);
+                log::error!("Error reading WAV file: {}", e);
                 None
             }
         }
@@ -184,14 +186,30 @@ impl AudioRecorder {
 
 thread_local! {
     static RECORDER: RefCell<AudioRecorder> = RefCell::new(AudioRecorder::new());
+    static ENIGO: RefCell<Enigo> = RefCell::new(Enigo::new(&Settings::default()).expect("Failed to create Enigo"));
 }
 
 pub fn main() {
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
+        .format(|buf, record| {
+            use std::io::Write;
+            let timestamp = chrono::Local::now().format("%I:%M%p");
+            let style = buf.default_level_style(record.level());
+            let level_style = format!("{style}{}{style:#}", record.level());
+            writeln!(
+                buf,
+                "[{} {} {}] {}",
+                timestamp,
+                level_style,
+                record.target(),
+                record.args()
+            )
+        })
+        .format_level(true)
         .write_style(WriteStyle::Always)
-        .format_timestamp(None)
         .init();
+
     tauri::Builder::default()
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -202,9 +220,27 @@ pub fn main() {
                 .build(app)?;
 
             let app_handle = app.handle().clone();
+
+            let (tx, mut rx) = mpsc::channel::<()>(1);
+            app_handle.manage(tx);
+
             let tray_id = tray_icon.id().clone();
 
-            _ = spawn(key_logger(app_handle, tray_id));
+            // Key logger task
+            spawn(key_logger(app_handle, tray_id));
+
+            // Pasting (Cmd + V) task
+            spawn(async move {
+                let mut enigo =
+                    Enigo::new(&Settings::default()).expect("Failed to create Enigo");
+                loop {
+                    if let Ok(()) = rx.try_recv() {
+                        _ = enigo.key(Key::Meta, Direction::Press);
+                        _ = enigo.key(Key::Unicode('v'), Direction::Click);
+                        _ = enigo.key(Key::Meta, Direction::Release);
+                    }
+                }
+            });
 
             Ok(())
         })
@@ -215,7 +251,10 @@ pub fn main() {
                 ..
             } = event
             {
-                log::info!("Tray icon clicked at: {}", chrono::Local::now());
+                log::debug!(
+                    "Tray icon clicked at: {}",
+                    chrono::Local::now().format("%H:%M%p").to_string().yellow()
+                );
                 let recording_result =
                     toggle_recording(app_handle.clone(), tray_id.clone())
                         .expect("Failed to toggle recording");
@@ -273,8 +312,9 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
 
     // Handle key down events
     let _key_down_cb = device_state.on_key_down(move |&key| {
-        if key == Keycode::Command || key == Keycode::LOption || key == Keycode::ROption {
-            log::debug!("Modifier key pressed: {}", key);
+        if key == Keycode::Command || key == Keycode::LControl || key == Keycode::RControl
+        {
+            log::debug!("Modifier key pressed: {}", format!("'{key}'").blue());
             modifiers_held.lock().unwrap().insert(key);
             return;
         }
@@ -282,10 +322,13 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
         {
             let modifiers_held_ = modifiers_held.lock().unwrap();
             if !(modifiers_held_.contains(&Keycode::Command)
-                && (modifiers_held_.contains(&Keycode::LOption)
-                    || modifiers_held_.contains(&Keycode::ROption)))
+                && (modifiers_held_.contains(&Keycode::LControl)
+                    || modifiers_held_.contains(&Keycode::RControl)))
             {
-                log::debug!("Key pressed '{key}' while modifiers not held. Returning...");
+                log::debug!(
+                    "Key pressed {} while modifiers not held. Returning.",
+                    format!("'{key}'").blue()
+                );
                 return;
             }
         }
@@ -295,8 +338,8 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
         }
 
         log::info!(
-            "'{}' pressed while modifiers held. {} recording...",
-            key.to_string().red(),
+            "{} pressed while modifiers held. {} recording...",
+            format!("'{key}'").red(),
             "Toggling".red()
         );
 
@@ -350,13 +393,19 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
                 .tray_by_id(&tray_id)
                 .unwrap()
                 .set_icon(Some(app_handle.default_window_icon().unwrap().clone()));
+
+            ENIGO.with_borrow_mut(|enigo| {
+                _ = enigo.key(Key::Meta, Direction::Press);
+                _ = enigo.key(Key::Unicode('v'), Direction::Click);
+                _ = enigo.key(Key::Meta, Direction::Release);
+            });
         });
     });
 
     // Handle key up events
     let _key_up_cb = device_state.on_key_up(move |&key| {
         if key == Keycode::Command || key == Keycode::LOption || key == Keycode::ROption {
-            log::debug!("modifier key released: {}", key);
+            log::debug!("modifier key released: {}", format!("'{key}'").blue());
             modifiers_held_.lock().unwrap().remove(&key);
         }
     });
@@ -384,7 +433,10 @@ fn toggle_recording(
         .with_context(|| format!("could not get tray_icon from tray_id: {tray_id:?}"))?;
 
     let recording_result = RECORDER.with_borrow_mut(|recorder| {
-        log::info!("Recorder is recording: {}", recorder.is_recording);
+        log::info!(
+            "Recorder is recording: {}",
+            recorder.is_recording.to_string().yellow()
+        );
 
         if !recorder.is_recording {
             _ = std::process::Command::new("osascript")
