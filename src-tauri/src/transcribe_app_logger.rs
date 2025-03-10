@@ -1,8 +1,8 @@
 use env_logger::{Builder, WriteStyle};
 
-pub fn init() {
+pub fn init(log_level: log::LevelFilter) {
     Builder::new()
-        .filter_level(log::LevelFilter::Info)
+        .filter_level(log_level)
         .format(|buf, record| {
             use std::io::Write;
             let timestamp = chrono::Local::now().format("%I:%M%p");
