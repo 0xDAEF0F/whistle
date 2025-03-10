@@ -1,22 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audio_recorder;
 mod constants;
+mod key_state_manager;
+mod transcribe_app_logger;
+mod transcribe_client;
 use anyhow::{Context, Result};
+use audio_recorder::AudioRecorder;
 use colored::*;
-use constants::API_BASE_URL;
-use cpal::{
-    Stream,
-    traits::{DeviceTrait, HostTrait, StreamTrait},
-};
-use device_query::{DeviceEvents, DeviceEventsHandler, Keycode};
+use device_query::{DeviceEvents, DeviceEventsHandler};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-use env_logger::WriteStyle;
-use hound::{WavSpec, WavWriter};
-use reqwest::Client;
-use serde::Deserialize;
+use key_state_manager::{KeyStateManager, TranscribeAction};
 use std::{
     cell::RefCell,
-    collections::HashSet,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -27,161 +23,7 @@ use tauri::{
     tray::{MouseButtonState, TrayIconBuilder, TrayIconEvent, TrayIconId},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tempfile::NamedTempFile;
-
-struct AudioRecorder {
-    stream: Option<Stream>,
-    sample_rate: Option<u32>,
-    channels: Option<u16>,
-    samples: Arc<Mutex<Vec<i16>>>,
-    is_recording: bool,
-}
-
-impl AudioRecorder {
-    fn new() -> Self {
-        Self {
-            stream: None,
-            sample_rate: None,
-            channels: None,
-            samples: Arc::new(Mutex::new(Vec::new())),
-            is_recording: false,
-        }
-    }
-
-    fn start_recording(&mut self) {
-        if self.is_recording {
-            return;
-        }
-
-        log::debug!("'AudioRecorder' starting to record!");
-
-        let device = cpal::default_host()
-            .default_input_device()
-            .expect("No input device available");
-        let config = device.default_input_config().unwrap();
-
-        // Store audio format information
-        self.sample_rate = Some(config.sample_rate().0);
-        self.channels = Some(config.channels() as u16);
-
-        // Clear previous samples
-        self.samples.lock().unwrap().clear();
-
-        // Create a samples buffer for the callback
-        let samples_for_callback = self.samples.clone();
-
-        self.is_recording = true;
-        log::debug!(
-            "'AudioRecorder' is recording: {} (should be true)",
-            self.is_recording
-        );
-
-        let stream = device
-            .build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    let mut samples = samples_for_callback.lock().unwrap();
-                    for &sample in data {
-                        // Apply gain (increase volume) - adjust the multiplier as needed
-                        let amplified_sample = sample * 3.0;
-
-                        // Avoids distortion
-                        let clamped_sample = amplified_sample.clamp(-1.0, 1.0);
-
-                        // Convert f32 to i16
-                        let sample = (clamped_sample * 32767.0) as i16;
-                        samples.push(sample);
-                    }
-                },
-                |err| log::error!("An error occurred on the audio stream: {}", err),
-                None,
-            )
-            .expect("Failed to build input stream");
-
-        stream.play().expect("Failed to start audio stream");
-        self.stream = Some(stream);
-    }
-
-    fn stop_recording_and_get_bytes(&mut self) -> Option<Vec<u8>> {
-        if !self.is_recording {
-            return None;
-        }
-
-        log::debug!("'AudioRecorder' stopping recording");
-
-        self.is_recording = false;
-        log::debug!(
-            "'AudioRecorder' is recording: {} (should be false)",
-            self.is_recording
-        );
-
-        // Drop the stream to stop recording
-        self.stream = None;
-
-        // Get the recorded samples
-        let samples = self.samples.lock().unwrap().clone();
-
-        if samples.is_empty() || self.sample_rate.is_none() || self.channels.is_none() {
-            return None;
-        }
-
-        // Create a temporary file for the WAV
-        let temp_file = match NamedTempFile::new() {
-            Ok(file) => file,
-            Err(e) => {
-                eprintln!("Error creating temporary file: {}", e);
-                return None;
-            }
-        };
-
-        let temp_path = temp_file.path().to_owned();
-
-        // Create a WAV file
-        let spec = WavSpec {
-            channels: self.channels.unwrap(),
-            sample_rate: self.sample_rate.unwrap(),
-            bits_per_sample: 16,
-            sample_format: hound::SampleFormat::Int,
-        };
-
-        // Create a writer for the WAV file
-        let mut writer = match WavWriter::create(&temp_path, spec) {
-            Ok(writer) => writer,
-            Err(e) => {
-                eprintln!("Error creating WAV writer: {}", e);
-                return None;
-            }
-        };
-
-        // Write all samples
-        for &sample in &samples {
-            if let Err(e) = writer.write_sample(sample) {
-                eprintln!("Error writing sample: {}", e);
-                return None;
-            }
-        }
-
-        // Finalize the WAV file
-        if let Err(e) = writer.finalize() {
-            eprintln!("Error finalizing WAV file: {}", e);
-            return None;
-        }
-
-        // Read the file back into memory
-        match std::fs::read(&temp_path) {
-            Ok(bytes) => {
-                let size_mb = bytes.len() as f64 / 1_048_576.0;
-                let formatted_size = format!("{:.2} MB", size_mb);
-                log::info!("Recording captured: {}", formatted_size.red());
-                Some(bytes)
-            }
-            Err(e) => {
-                log::error!("Error reading WAV file: {}", e);
-                None
-            }
-        }
-    }
-}
+use transcribe_client::TranscribeClient;
 
 thread_local! {
     static RECORDER: RefCell<AudioRecorder> = RefCell::new(AudioRecorder::new());
@@ -189,25 +31,7 @@ thread_local! {
 }
 
 pub fn main() {
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
-        .format(|buf, record| {
-            use std::io::Write;
-            let timestamp = chrono::Local::now().format("%I:%M%p");
-            let style = buf.default_level_style(record.level());
-            let level_style = format!("{style}{}{style:#}", record.level());
-            writeln!(
-                buf,
-                "[{} {} {}] {}",
-                timestamp,
-                level_style,
-                record.target(),
-                record.args()
-            )
-        })
-        .format_level(true)
-        .write_style(WriteStyle::Always)
-        .init();
+    transcribe_app_logger::init();
 
     tauri::Builder::default()
         .setup(|app| {
@@ -219,13 +43,18 @@ pub fn main() {
                 .build(app)?;
 
             let transcribe_client = TranscribeClient::new();
-            if !app.handle().manage(transcribe_client) {
-                log::error!("Failed to manage 'TranscribeClient'");
-            } else {
-                log::info!("Successfully managed 'TranscribeClient'");
-            };
 
-            spawn(key_logger(app.handle().clone(), tray_icon.id().clone()));
+            let is_success = app.manage(transcribe_client);
+            assert!(is_success, "Failed to manage 'TranscribeClient'");
+            log::info!("Successfully managed 'TranscribeClient'");
+
+            let a = app.handle().clone();
+            let b = tray_icon.id().clone();
+            spawn(async move {
+                if let Err(e) = key_logger(a, b).await {
+                    log::error!("Error on 'key_logger' task: {e}");
+                };
+            });
 
             Ok(())
         })
@@ -298,58 +127,20 @@ pub fn main() {
 
 async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
     let device_state = DeviceEventsHandler::new(Duration::from_millis(20))
-        .expect("Failed to start event loop");
+        .context("Failed to init 'DeviceEventsHandler'")?;
 
-    struct KeysPressed(HashSet<Keycode>);
-
-    enum TranscribeAction {
-        TranscribeEnglish,
-        TranscribeSpanish,
-        CleanseTranscription, // from clipboard
-    }
-
-    impl KeysPressed {
-        pub fn new() -> Self {
-            Self(HashSet::new())
-        }
-
-        pub fn add_key(&mut self, key: Keycode) {
-            self.0.insert(key);
-        }
-
-        pub fn remove_key(&mut self, key: &Keycode) {
-            self.0.remove(key);
-        }
-
-        pub fn match_action(&self) -> Option<TranscribeAction> {
-            use Keycode::*;
-            if self.0.is_superset(&[F19].into()) {
-                return Some(TranscribeAction::TranscribeEnglish);
-            }
-            if self.0.is_superset(&[F20].into()) {
-                return Some(TranscribeAction::CleanseTranscription);
-            }
-            None
-        }
-
-        pub fn keys_in_question() -> [Keycode; 2] {
-            use Keycode::*;
-            [F19, F20]
-        }
-    }
-
-    let keys_pressed = Arc::new(Mutex::new(KeysPressed::new()));
-    let keys_pressed_ = Arc::clone(&keys_pressed);
+    let key_state_manager = Arc::new(Mutex::new(KeyStateManager::new()));
+    let key_state_manager_ = Arc::clone(&key_state_manager);
 
     // Handle key down events
-    let _key_down_cb = device_state.on_key_down(move |&key| {
-        if !KeysPressed::keys_in_question().contains(&key) {
+    let _key_down_cb = device_state.on_key_down(move |key| {
+        if !KeyStateManager::keys_in_question().contains(key) {
             log::trace!("Key pressed is not in question: {}", format!("'{key}'").blue());
             return;
         }
 
-        let mut keys_pressed = keys_pressed.lock().unwrap();
-        keys_pressed.add_key(key);
+        let mut keys_pressed = key_state_manager.lock().unwrap();
+        keys_pressed.add_key(*key);
 
         let Some(action) = keys_pressed.match_action() else {
             return;
@@ -449,12 +240,12 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
 
     // Handle key up events
     let _key_up_cb = device_state.on_key_up(move |key| {
-        if !KeysPressed::keys_in_question().contains(key) {
+        if !KeyStateManager::keys_in_question().contains(key) {
             log::trace!("Key pressed is not in question: {}", format!("'{key}'").blue());
             return;
         }
         log::trace!("Key released: {}", format!("'{key}'").blue());
-        keys_pressed_.lock().unwrap().remove_key(key);
+        key_state_manager_.lock().unwrap().remove_key(key);
     });
 
     loop {
@@ -505,53 +296,4 @@ fn toggle_recording(
     })?;
 
     Ok(recording_result)
-}
-
-struct TranscribeClient {
-    http_client: Client,
-}
-
-#[derive(Debug, Deserialize)]
-struct TranscriptionResponse {
-    text: String,
-    original_text: Option<String>,
-}
-
-impl TranscribeClient {
-    fn new() -> Self {
-        Self {
-            http_client: Client::new(),
-        }
-    }
-
-    async fn fetch_transcription(&self, recording: Vec<u8>) -> Result<String> {
-        let res = self
-            .http_client
-            .post(format!("{API_BASE_URL}/transcribe"))
-            .header("Content-Type", "audio/wav")
-            .body(recording)
-            .send()
-            .await?;
-
-        let res: TranscriptionResponse = res.json().await?;
-
-        Ok(res.text)
-    }
-
-    async fn clean_transcription(&self, transcription: String) -> Result<String> {
-        let res = self
-            .http_client
-            .post(format!("{API_BASE_URL}/clean-transcription"))
-            .header("Content-Type", "application/json")
-            .body(serde_json::json!({ "text": transcription }).to_string())
-            .send()
-            .await?;
-
-        let response: TranscriptionResponse = res.json().await?;
-
-        let _original_text =
-            response.original_text.context("Failed to get original text")?;
-
-        Ok(response.text)
-    }
 }
