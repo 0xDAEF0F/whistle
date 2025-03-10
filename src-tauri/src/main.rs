@@ -13,7 +13,8 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use env_logger::WriteStyle;
 use hound::{WavSpec, WavWriter};
 use reqwest::Client;
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::HashSet,
@@ -190,7 +191,7 @@ thread_local! {
 
 pub fn main() {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Warn)
+        .filter_level(log::LevelFilter::Info)
         .format(|buf, record| {
             use std::io::Write;
             let timestamp = chrono::Local::now().format("%I:%M%p");
@@ -460,6 +461,12 @@ struct TranscribeClient {
     http_client: Client,
 }
 
+#[derive(Debug, Deserialize)]
+struct TranscriptionResponse {
+    text: String,
+    original_text: Option<String>,
+}
+
 impl TranscribeClient {
     fn new() -> Self {
         Self {
@@ -476,25 +483,25 @@ impl TranscribeClient {
             .send()
             .await?;
 
-        let response: Value = serde_json::from_str(&res.text().await?)?;
+        let res: TranscriptionResponse = res.json().await?;
 
-        Ok(response["text"].to_string())
+        Ok(res.text)
     }
 
     async fn clean_transcription(&self, transcription: String) -> Result<String> {
         let res = self
             .http_client
             .post(format!("{API_BASE_URL}/clean-transcription"))
-            .header("Content-Type", "text/plain")
-            .body(transcription)
+            .header("Content-Type", "application/json")
+            .body(json!({ "text": transcription }).to_string())
             .send()
             .await?;
 
-        let response: Value = serde_json::from_str(&res.text().await?)?;
+        let response: TranscriptionResponse = res.json().await?;
 
-        let _original_text = response["original_text"].to_string();
-        let cleaned_text = response["text"].to_string();
+        let _original_text =
+            response.original_text.context("Failed to get original text")?;
 
-        Ok(cleaned_text)
+        Ok(response.text)
     }
 }

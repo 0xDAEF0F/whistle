@@ -22,7 +22,7 @@ cpal = "0.15.3"
 hound = "3.5.1"
 chrono = "0.4.40"
 tokio = { version = "1.43.0", features = ["full"] }
-reqwest = { version = "0.12.12", features = ["blocking"] }
+reqwest = { version = "0.12.12", features = ["json"] }
 anyhow = "1.0.97"
 tempfile = "3.10.1"
 log = "0.4.26"
