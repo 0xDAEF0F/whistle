@@ -81,6 +81,10 @@ pub fn main() {
             assert!(is_success, "Failed to manage 'TranscribeIcon'");
             log::info!("Successfully managed 'TranscribeIcon'");
 
+            let is_success = app.manage(Arc::new(Mutex::new(false)));
+            assert!(is_success, "Failed to manage 'IsCleansing'");
+            log::info!("Successfully managed 'IsCleansing'");
+
             let app_handle = app.handle().clone();
             spawn(async move {
                 if let Err(e) = key_logger(app_handle).await {
@@ -96,7 +100,7 @@ pub fn main() {
                 ..
             } = event
             {
-                log::debug!(
+                log::trace!(
                     "Tray icon clicked at: {}",
                     chrono::Local::now().format("%H:%M%p").to_string().yellow()
                 );
@@ -242,6 +246,15 @@ async fn key_logger(app_handle: AppHandle) -> Result<()> {
                 });
             });
         } else if let TranscribeAction::CleanseTranscription = action {
+            let is_cleansing_m = app_handle.state::<Arc<Mutex<bool>>>();
+            let mut is_cleansing = is_cleansing_m.lock().unwrap();
+            if *is_cleansing {
+                log::warn!("Already cleansing. Skipping.");
+                return;
+            }
+            *is_cleansing = true;
+            drop(is_cleansing);
+
             _ = app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
 
             let original_text =
@@ -273,6 +286,10 @@ async fn key_logger(app_handle: AppHandle) -> Result<()> {
                     _ = enigo.key(Key::Meta, Direction::Release);
                 });
                 _ = app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
+
+                let is_cleansing = app_handle_.state::<Arc<Mutex<bool>>>();
+                *is_cleansing.lock().unwrap() = false;
+                log::info!("Cleansing complete. Set 'IsCleansing' to false");
             });
         }
     });
