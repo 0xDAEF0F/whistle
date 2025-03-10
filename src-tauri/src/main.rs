@@ -14,7 +14,6 @@ use env_logger::WriteStyle;
 use hound::{WavSpec, WavWriter};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{Value, json};
 use std::{
     cell::RefCell,
     collections::HashSet,
@@ -301,110 +300,161 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
     let device_state = DeviceEventsHandler::new(Duration::from_millis(20))
         .expect("Failed to start event loop");
 
-    let modifiers_held = Arc::new(Mutex::new(HashSet::new()));
-    let modifiers_held_ = Arc::clone(&modifiers_held);
+    struct KeysPressed(HashSet<Keycode>);
+
+    enum TranscribeAction {
+        TranscribeEnglish,
+        TranscribeSpanish,
+        CleanseTranscription, // from clipboard
+    }
+
+    impl KeysPressed {
+        pub fn new() -> Self {
+            Self(HashSet::new())
+        }
+
+        pub fn add_key(&mut self, key: Keycode) {
+            self.0.insert(key);
+        }
+
+        pub fn remove_key(&mut self, key: &Keycode) {
+            self.0.remove(key);
+        }
+
+        pub fn match_action(&self) -> Option<TranscribeAction> {
+            use Keycode::*;
+            if self.0.is_superset(&[F19].into()) {
+                return Some(TranscribeAction::TranscribeEnglish);
+            }
+            if self.0.is_superset(&[F20].into()) {
+                return Some(TranscribeAction::CleanseTranscription);
+            }
+            None
+        }
+
+        pub fn keys_in_question() -> [Keycode; 2] {
+            use Keycode::*;
+            [F19, F20]
+        }
+    }
+
+    let keys_pressed = Arc::new(Mutex::new(KeysPressed::new()));
+    let keys_pressed_ = Arc::clone(&keys_pressed);
 
     // Handle key down events
     let _key_down_cb = device_state.on_key_down(move |&key| {
-        if key == Keycode::Command || key == Keycode::LControl || key == Keycode::RControl
-        {
-            log::debug!("Modifier key pressed: {}", format!("'{key}'").blue());
-            modifiers_held.lock().unwrap().insert(key);
+        if !KeysPressed::keys_in_question().contains(&key) {
+            log::trace!("Key pressed is not in question: {}", format!("'{key}'").blue());
             return;
         }
 
-        {
-            let modifiers_held_ = modifiers_held.lock().unwrap();
-            let cmd_ctrl_held = {
-                modifiers_held_.contains(&Keycode::Command)
-                    && (modifiers_held_.contains(&Keycode::LControl)
-                        || modifiers_held_.contains(&Keycode::RControl))
-            };
-            if !cmd_ctrl_held && key != Keycode::F20 {
-                log::debug!(
-                    "Key pressed {} while modifiers not held. Returning.",
-                    format!("'{key}'").blue()
-                );
-                return;
-            }
-        }
+        let mut keys_pressed = keys_pressed.lock().unwrap();
+        keys_pressed.add_key(key);
 
-        if key != Keycode::R && key != Keycode::S && key != Keycode::F20 {
-            return;
-        }
-
-        log::info!(
-            "{} pressed while modifiers held. {} recording...",
-            format!("'{key}'").red(),
-            "Toggling".red()
-        );
-
-        let rec_res =
-            toggle_recording(app_handle.clone(), tray_id.clone()).map_err(|e| {
-                log::error!("Failed to toggle recording: {}", e);
-            });
-        let Ok(RecordingResult::RecordingResult(recording_bytes)) = rec_res else {
+        let Some(action) = keys_pressed.match_action() else {
             return;
         };
+        drop(keys_pressed);
 
-        log::debug!(
-            "Sending recording to API. Bytes: {}",
-            recording_bytes.len().to_string().yellow()
-        );
+        if let TranscribeAction::TranscribeEnglish = action {
+            let rec_res =
+                toggle_recording(app_handle.clone(), tray_id.clone()).map_err(|e| {
+                    log::error!("Failed to toggle recording: {}", e);
+                });
+            let Ok(RecordingResult::RecordingResult(recording_bytes)) = rec_res else {
+                return;
+            };
 
-        // Do not block the UI thread.
-        let app_handle = app_handle.clone();
-        let tray_id = tray_id.clone();
-        spawn(async move {
-            let transcribe_client = app_handle.try_state::<TranscribeClient>();
-            let transcribe_client = transcribe_client
-                .context("Failed to retrieve 'TranscribeClient' (not managed)")
-                .map_err(|e| {
-                    log::error!("{e}");
-                    e
-                })
-                .unwrap(); // TODO: Handle this better.
+            log::debug!(
+                "Sending recording to API. Bytes: {}",
+                recording_bytes.len().to_string().yellow()
+            );
 
-            let text = transcribe_client
-                .fetch_transcription(recording_bytes)
-                .await
-                .map_err(|e| {
-                    log::error!("Failed to call API: {}", e);
-                })
-                .unwrap();
+            // Do not block the UI thread.
+            let app_handle = app_handle.clone();
+            let tray_id = tray_id.clone();
+            spawn(async move {
+                let transcribe_client = app_handle.try_state::<TranscribeClient>();
+                let transcribe_client = transcribe_client
+                    .context("Failed to retrieve 'TranscribeClient' (not managed)")
+                    .map_err(|e| {
+                        log::error!("{e}");
+                        e
+                    })
+                    .unwrap(); // TODO: Handle this better.
 
-            log::info!("Writing text to clipboard: {}", text.to_string().yellow());
+                let text = transcribe_client
+                    .fetch_transcription(recording_bytes)
+                    .await
+                    .map_err(|e| {
+                        log::error!("Failed to call API: {}", e);
+                    })
+                    .unwrap();
 
-            app_handle
-                .clipboard()
-                .write_text(text)
-                .map_err(|e| {
-                    log::error!("Failed to write to clipboard: {}", e);
-                })
-                .unwrap();
+                log::info!("Writing text to clipboard: {}", text.to_string().yellow());
 
-            log::trace!("Successfully wrote text to clipboard");
+                app_handle
+                    .clipboard()
+                    .write_text(text)
+                    .map_err(|e| {
+                        log::error!("Failed to write to clipboard: {}", e);
+                    })
+                    .unwrap();
 
-            _ = app_handle
-                .tray_by_id(&tray_id)
-                .unwrap()
-                .set_icon(Some(app_handle.default_window_icon().unwrap().clone()));
+                log::trace!("Successfully wrote text to clipboard");
 
-            ENIGO.with_borrow_mut(|enigo| {
-                _ = enigo.key(Key::Meta, Direction::Press);
-                _ = enigo.key(Key::Unicode('v'), Direction::Click);
-                _ = enigo.key(Key::Meta, Direction::Release);
+                _ = app_handle
+                    .tray_by_id(&tray_id)
+                    .unwrap()
+                    .set_icon(Some(app_handle.default_window_icon().unwrap().clone()));
+
+                ENIGO.with_borrow_mut(|enigo| {
+                    _ = enigo.key(Key::Meta, Direction::Press);
+                    _ = enigo.key(Key::Unicode('v'), Direction::Click);
+                    _ = enigo.key(Key::Meta, Direction::Release);
+                });
             });
-        });
+        } else if let TranscribeAction::CleanseTranscription = action {
+            let original_text =
+                app_handle.clipboard().read_text().expect("Failed to read clipboard");
+            log::info!("Starting cleanse of: {}", original_text.to_string().yellow());
+            let app_handle_ = app_handle.clone();
+
+            spawn(async move {
+                let transcribe_client = app_handle_
+                    .try_state::<TranscribeClient>()
+                    .expect("Failed to retrieve 'TranscribeClient' (not managed)");
+
+                let cleansed_text = transcribe_client
+                    .clean_transcription(original_text)
+                    .await
+                    .expect("Failed to clean transcription");
+                log::info!("Cleansed text: {}", cleansed_text.to_string().yellow());
+
+                ENIGO.with_borrow_mut(|enigo| {
+                    _ = enigo.key(Key::Meta, Direction::Press);
+                    _ = enigo.key(Key::Unicode('z'), Direction::Click);
+
+                    app_handle_
+                        .clipboard()
+                        .write_text(cleansed_text)
+                        .expect("Failed to write to clipboard");
+
+                    _ = enigo.key(Key::Unicode('v'), Direction::Click);
+                    _ = enigo.key(Key::Meta, Direction::Release);
+                })
+            });
+        }
     });
 
     // Handle key up events
-    let _key_up_cb = device_state.on_key_up(move |&key| {
-        modifiers_held_.lock().unwrap().remove(&key);
-        if key == Keycode::Command || key == Keycode::LControl || key == Keycode::RControl
-        {
-            log::debug!("modifier key released: {}", format!("'{key}'").blue());
+    let _key_up_cb = device_state.on_key_up(move |key| {
+        if !KeysPressed::keys_in_question().contains(key) {
+            log::trace!("Key pressed is not in question: {}", format!("'{key}'").blue());
+            return;
         }
+        log::trace!("Key released: {}", format!("'{key}'").blue());
+        keys_pressed_.lock().unwrap().remove_key(key);
     });
 
     loop {
@@ -493,7 +543,7 @@ impl TranscribeClient {
             .http_client
             .post(format!("{API_BASE_URL}/clean-transcription"))
             .header("Content-Type", "application/json")
-            .body(json!({ "text": transcription }).to_string())
+            .body(serde_json::json!({ "text": transcription }).to_string())
             .send()
             .await?;
 
