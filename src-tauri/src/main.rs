@@ -3,7 +3,7 @@
 mod constants;
 use anyhow::{Context, Result};
 use colored::*;
-use constants::API_URL;
+use constants::API_BASE_URL;
 use cpal::{
     Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -13,7 +13,7 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 use env_logger::WriteStyle;
 use hound::{WavSpec, WavWriter};
 use reqwest::Client;
-use serde::Deserialize;
+use serde_json::Value;
 use std::{
     cell::RefCell,
     collections::HashSet,
@@ -28,7 +28,6 @@ use tauri::{
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tempfile::NamedTempFile;
-use tokio::sync::mpsc;
 
 struct AudioRecorder {
     stream: Option<Stream>,
@@ -191,7 +190,7 @@ thread_local! {
 
 pub fn main() {
     env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
+        .filter_level(log::LevelFilter::Warn)
         .format(|buf, record| {
             use std::io::Write;
             let timestamp = chrono::Local::now().format("%I:%M%p");
@@ -219,28 +218,14 @@ pub fn main() {
                 .icon(app.default_window_icon().unwrap().clone())
                 .build(app)?;
 
-            let app_handle = app.handle().clone();
+            let transcribe_client = TranscribeClient::new();
+            if !app.handle().manage(transcribe_client) {
+                log::error!("Failed to manage 'TranscribeClient'");
+            } else {
+                log::info!("Successfully managed 'TranscribeClient'");
+            };
 
-            let (tx, mut rx) = mpsc::channel::<()>(1);
-            app_handle.manage(tx);
-
-            let tray_id = tray_icon.id().clone();
-
-            // Key logger task
-            spawn(key_logger(app_handle, tray_id));
-
-            // Pasting (Cmd + V) task
-            spawn(async move {
-                let mut enigo =
-                    Enigo::new(&Settings::default()).expect("Failed to create Enigo");
-                loop {
-                    if let Ok(()) = rx.try_recv() {
-                        _ = enigo.key(Key::Meta, Direction::Press);
-                        _ = enigo.key(Key::Unicode('v'), Direction::Click);
-                        _ = enigo.key(Key::Meta, Direction::Release);
-                    }
-                }
-            });
+            spawn(key_logger(app.handle().clone(), tray_icon.id().clone()));
 
             Ok(())
         })
@@ -265,16 +250,23 @@ pub fn main() {
                     let app_handle = app_handle.clone();
                     let tray_id = tray_id.clone();
                     spawn(async move {
-                        let text = call_api_and_retrieve_transcription(
-                            reqwest::Client::new(),
-                            recording_bytes,
-                            Language::English,
-                        )
-                        .await
-                        .map_err(|e| {
-                            log::error!("Failed to call API: {}", e);
-                        })
-                        .unwrap();
+                        let transcribe_client =
+                            app_handle.try_state::<TranscribeClient>();
+                        let transcribe_client = transcribe_client
+                            .context(
+                                "Failed to retrieve 'TranscribeClient' (not managed)",
+                            )
+                            .map_err(|e| {
+                                log::error!("{e}");
+                                e
+                            })?;
+                        let text = transcribe_client
+                            .fetch_transcription(recording_bytes)
+                            .await
+                            .map_err(|e| {
+                                log::error!("Failed to call the API: {}", e);
+                                e
+                            })?;
 
                         log::info!(
                             "Writing text to clipboard: {}",
@@ -294,6 +286,7 @@ pub fn main() {
                             app_handle.default_window_icon().unwrap().clone(),
                         ));
                         log::trace!("Successfully set tray icon to default");
+                        anyhow::Ok(())
                     });
                 }
             }
@@ -304,7 +297,7 @@ pub fn main() {
 }
 
 async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
-    let device_state = DeviceEventsHandler::new(Duration::from_millis(10))
+    let device_state = DeviceEventsHandler::new(Duration::from_millis(20))
         .expect("Failed to start event loop");
 
     let modifiers_held = Arc::new(Mutex::new(HashSet::new()));
@@ -326,7 +319,7 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
                     && (modifiers_held_.contains(&Keycode::LControl)
                         || modifiers_held_.contains(&Keycode::RControl))
             };
-            if !cmd_ctrl_held && key != Keycode::F6 {
+            if !cmd_ctrl_held && key != Keycode::F20 {
                 log::debug!(
                     "Key pressed {} while modifiers not held. Returning.",
                     format!("'{key}'").blue()
@@ -335,7 +328,7 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
             }
         }
 
-        if key != Keycode::R && key != Keycode::S && key != Keycode::F6 {
+        if key != Keycode::R && key != Keycode::S && key != Keycode::F20 {
             return;
         }
 
@@ -358,26 +351,26 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
             recording_bytes.len().to_string().yellow()
         );
 
-        let language = if key == Keycode::S {
-            Language::Spanish
-        } else {
-            Language::English
-        };
-
         // Do not block the UI thread.
         let app_handle = app_handle.clone();
         let tray_id = tray_id.clone();
         spawn(async move {
-            let text = call_api_and_retrieve_transcription(
-                reqwest::Client::new(),
-                recording_bytes,
-                language,
-            )
-            .await
-            .map_err(|e| {
-                log::error!("Failed to call API: {}", e);
-            })
-            .unwrap();
+            let transcribe_client = app_handle.try_state::<TranscribeClient>();
+            let transcribe_client = transcribe_client
+                .context("Failed to retrieve 'TranscribeClient' (not managed)")
+                .map_err(|e| {
+                    log::error!("{e}");
+                    e
+                })
+                .unwrap(); // TODO: Handle this better.
+
+            let text = transcribe_client
+                .fetch_transcription(recording_bytes)
+                .await
+                .map_err(|e| {
+                    log::error!("Failed to call API: {}", e);
+                })
+                .unwrap();
 
             log::info!("Writing text to clipboard: {}", text.to_string().yellow());
 
@@ -414,7 +407,7 @@ async fn key_logger(app_handle: AppHandle, tray_id: TrayIconId) -> Result<()> {
     });
 
     loop {
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -463,39 +456,45 @@ fn toggle_recording(
     Ok(recording_result)
 }
 
-#[derive(Default, Debug)]
-enum Language {
-    #[default]
-    English,
-    Spanish,
-}
-
-impl std::fmt::Display for Language {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-async fn call_api_and_retrieve_transcription(
+struct TranscribeClient {
     http_client: Client,
-    recording: Vec<u8>,
-    language: Language,
-) -> Result<String> {
-    log::debug!("Whisper language: {language:?}",);
-    let lang = language.to_string();
-    let res = http_client
-        .post(API_URL)
-        .header("Content-Type", "audio/wav")
-        .query(&[("lang", lang.as_str()), ("model", "small")])
-        .body(recording)
-        .send()
-        .await?;
+}
 
-    #[derive(Deserialize)]
-    struct Response {
-        text: String,
+impl TranscribeClient {
+    fn new() -> Self {
+        Self {
+            http_client: Client::new(),
+        }
     }
-    let response: Response = serde_json::from_str(&res.text().await?)?;
 
-    Ok(response.text)
+    async fn fetch_transcription(&self, recording: Vec<u8>) -> Result<String> {
+        let res = self
+            .http_client
+            .post(format!("{API_BASE_URL}/transcribe"))
+            .header("Content-Type", "audio/wav")
+            .body(recording)
+            .send()
+            .await?;
+
+        let response: Value = serde_json::from_str(&res.text().await?)?;
+
+        Ok(response["text"].to_string())
+    }
+
+    async fn clean_transcription(&self, transcription: String) -> Result<String> {
+        let res = self
+            .http_client
+            .post(format!("{API_BASE_URL}/clean-transcription"))
+            .header("Content-Type", "text/plain")
+            .body(transcription)
+            .send()
+            .await?;
+
+        let response: Value = serde_json::from_str(&res.text().await?)?;
+
+        let _original_text = response["original_text"].to_string();
+        let cleaned_text = response["text"].to_string();
+
+        Ok(cleaned_text)
+    }
 }
