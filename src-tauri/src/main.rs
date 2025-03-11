@@ -20,6 +20,7 @@ use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,
     image::Image,
+    menu::{Menu, MenuItem},
     tray::{MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -67,8 +68,13 @@ pub fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
+            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&quit_i])?;
+
             let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .show_menu_on_left_click(false)
                 .build(app)?;
 
             let transcribe_client = TranscribeClient::new();
@@ -158,6 +164,12 @@ pub fn main() {
                         anyhow::Ok(())
                     });
                 }
+            }
+        })
+        .on_menu_event(|app_handle, event| match event.id.as_ref() {
+            "quit" => app_handle.exit(0),
+            id => {
+                log::warn!("Unknown menu event: {}", id);
             }
         })
         .plugin(tauri_plugin_clipboard_manager::init())
