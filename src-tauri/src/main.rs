@@ -3,6 +3,7 @@
 mod audio_recorder;
 mod constants;
 mod debouncer;
+mod enigo_instance;
 mod key_state_manager;
 mod transcribe_app_logger;
 mod transcribe_client;
@@ -11,6 +12,7 @@ use audio_recorder::AudioRecorder;
 use colored::*;
 use device_query::{DeviceEvents, DeviceEventsHandler};
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+use enigo_instance::{EnigoCommand, EnigoInstance};
 use key_state_manager::{KeyStateManager, TranscribeAction};
 use std::{
     cell::RefCell,
@@ -25,6 +27,7 @@ use tauri::{
     tray::{MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tokio::{task, time::sleep};
 use transcribe_client::TranscribeClient;
 
 thread_local! {
@@ -61,7 +64,8 @@ impl TranscribeIcon {
     }
 }
 
-pub fn main() {
+#[tokio::main]
+async fn main() {
     transcribe_app_logger::init(log::LevelFilter::Info);
 
     tauri::Builder::default()
@@ -117,7 +121,10 @@ pub fn main() {
             }
         })
         .on_menu_event(|app_handle, event| match event.id.as_ref() {
-            "quit" => app_handle.exit(0),
+            "quit" => {
+                log::info!("Quitting application!");
+                app_handle.exit(0);
+            }
             "toggle_recording" => {
                 log::trace!(
                     "Tray icon clicked at: {}",
@@ -128,6 +135,7 @@ pub fn main() {
 
                 if let RecordingResult::StartRecording = recording_result {
                     _ = app_handle.state::<TranscribeIcon>().change_icon(Icon::Recording);
+                    ////
                 }
                 if let RecordingResult::RecordingResult(recording_bytes) =
                     recording_result

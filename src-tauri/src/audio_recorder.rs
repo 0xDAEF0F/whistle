@@ -57,7 +57,7 @@ impl AudioRecorder {
         let stream = device
             .build_input_stream(
                 &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                move |data: &[f32], _| {
                     let mut samples = samples_for_callback.lock().unwrap();
                     for &sample in data {
                         // Apply gain (increase volume) - adjust the multiplier as needed
@@ -85,13 +85,12 @@ impl AudioRecorder {
             return None;
         }
 
-        log::debug!("'AudioRecorder' stopping recording");
-
-        self.is_recording = false;
         log::debug!(
-            "'AudioRecorder' is recording: {} (should be false)",
-            self.is_recording
+            "'AudioRecorder' switching state from {} to {}",
+            self.is_recording,
+            false
         );
+        self.is_recording = false;
 
         // Drop the stream to stop recording
         self.stream = None;
