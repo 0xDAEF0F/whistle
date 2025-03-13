@@ -2,6 +2,7 @@
 
 mod audio_recorder;
 mod constants;
+mod debouncer;
 mod key_state_manager;
 mod transcribe_app_logger;
 mod transcribe_client;
