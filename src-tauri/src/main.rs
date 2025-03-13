@@ -69,13 +69,19 @@ pub fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quit_i])?;
+            let toggle_recording_i = MenuItem::with_id(
+                app,
+                "toggle_recording",
+                "Toggle Recording 🎤",
+                true,
+                None::<&str>,
+            )?;
+            let quit_i = MenuItem::with_id(app, "quit", "Quit ✌️", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&toggle_recording_i, &quit_i])?;
 
             let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&menu)
-                .show_menu_on_left_click(false)
                 .build(app)?;
 
             let transcribe_client = TranscribeClient::new();
@@ -107,6 +113,12 @@ pub fn main() {
                 ..
             } = event
             {
+                log::info!("Tray icon clicked");
+            }
+        })
+        .on_menu_event(|app_handle, event| match event.id.as_ref() {
+            "quit" => app_handle.exit(0),
+            "toggle_recording" => {
                 log::trace!(
                     "Tray icon clicked at: {}",
                     chrono::Local::now().format("%H:%M%p").to_string().yellow()
@@ -166,9 +178,6 @@ pub fn main() {
                     });
                 }
             }
-        })
-        .on_menu_event(|app_handle, event| match event.id.as_ref() {
-            "quit" => app_handle.exit(0),
             id => {
                 log::warn!("Unknown menu event: {}", id);
             }

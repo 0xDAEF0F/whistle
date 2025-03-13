@@ -1,8 +1,6 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
-use tokio::{task::JoinHandle, time::sleep};
+use std::time::{Duration, Instant};
+use tauri::async_runtime::JoinHandle;
+use tokio::time::sleep;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(50);
 const DEFAULT_CLICK_THRESHOLD: Duration = Duration::from_millis(100);
@@ -38,7 +36,7 @@ impl ClickHandler {
         }
 
         let timeout = self.timeout;
-        let jh = tokio::spawn(async move {
+        let jh = tauri::async_runtime::spawn(async move {
             sleep(timeout).await;
             callback();
         });
@@ -57,7 +55,8 @@ impl ClickHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::{sync::oneshot, time::sleep};
+    use std::sync::{Arc, Mutex};
+    use tokio::time::sleep;
 
     #[tokio::test]
     async fn test_click_handler_triggers_callback_after_timeout() {
@@ -124,8 +123,8 @@ mod tests {
         // Sleep longer than the timeout
         sleep(Duration::from_millis(400)).await;
 
-        // Counter should still be 0 because the second click was detected as a double click
-        // and no callback was scheduled
+        // Counter should still be 0 because the second click was detected as
+        // a double click and no callback was scheduled
         assert_eq!(
             *counter.lock().unwrap(),
             0,
