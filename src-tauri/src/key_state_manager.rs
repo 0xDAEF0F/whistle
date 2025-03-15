@@ -3,7 +3,6 @@ use std::collections::HashSet;
 
 pub enum TranscribeAction {
     TranscribeEnglish,
-    TranscribeSpanish,
     CleanseTranscription, // from clipboard
 }
 

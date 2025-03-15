@@ -5,4 +5,3 @@
 - [ ] If music was playing, resume it after transcription.
 - [ ] Add panel to customize hotkeys.
 - [ ] Add idle logo/image to tray icon.
-- [ ] Change the `thread_local` to a `LocalSet` with tokio.

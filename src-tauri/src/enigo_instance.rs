@@ -1,11 +1,5 @@
 use anyhow::Result;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-use tokio::sync::mpsc::Receiver;
-
-pub enum EnigoCommand {
-    PasteFromClipboard,
-    UndoText,
-}
 
 pub struct EnigoInstance {
     enigo: Enigo,
