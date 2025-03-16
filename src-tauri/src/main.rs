@@ -9,6 +9,7 @@ mod local_task_handler;
 mod transcribe_app_logger;
 mod transcribe_client;
 mod transcribe_icon;
+
 use anyhow::Context;
 use colored::*;
 use key_logger::key_logger;
