@@ -22,6 +22,7 @@ use tauri::{
     tray::TrayIconBuilder,
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
+use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
@@ -39,9 +40,17 @@ fn main() {
     });
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            app.notification()
+                .builder()
+                .title("Tauri")
+                .body("Tauri is awesome")
+                .show()
+                .unwrap();
 
             let toggle_recording_i = MenuItem::with_id(
                 app,

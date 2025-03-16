@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::Result;
 use std::{cell::RefCell, rc::Rc};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, async_runtime::spawn};
 use tokio::{
     sync::{mpsc, oneshot},
     task::LocalSet,
@@ -38,6 +38,11 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>) {
             tokio::task::spawn_local(async move {
                 match task {
                     Task::ToggleRecording(tx_recording, app_handle) => {
+                        // spawn(async move {
+                        //     use colored::*;
+                        //     log::info!("{}", "hello".green());
+                        // });
+
                         let mut recorder = audio_recorder.borrow_mut();
                         let mut media_player = media_player.borrow_mut();
                         let transcribe_icon = app_handle.state::<TranscribeIcon>();
