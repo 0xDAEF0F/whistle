@@ -1,3 +1,4 @@
+use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use cpal::{
     Stream,
@@ -26,30 +27,27 @@ impl AudioRecorder {
         }
     }
 
-    pub fn start_recording(&mut self) {
+    pub fn reset(&mut self) {
+        self.stream = None;
+        self.sample_rate = None;
+        self.channels = None;
+        self.samples.lock().unwrap().clear();
+        self.is_recording = false;
+    }
+
+    pub fn start_recording(&mut self) -> Result<()> {
         if self.is_recording {
-            return;
-        }
-
-        log::debug!("'AudioRecorder' starting to record!");
-
-        let host = cpal::default_host();
-        let devices = host.devices().unwrap();
-
-        for device in devices {
-            log::info!("Device: {:?}", device.name().unwrap());
+            bail!("'AudioRecorder' is already recording, skipping...");
         }
 
         let device = cpal::default_host()
             .default_input_device()
-            .expect("No input device available");
-        println!("Device: {:?}", device.name());
-
-        let config = device.default_input_config().unwrap();
+            .context("No input device available")?;
+        let config = device.default_input_config()?;
 
         // Store audio format information
         self.sample_rate = Some(config.sample_rate().0);
-        self.channels = Some(config.channels() as u16);
+        self.channels = Some(config.channels());
 
         // Clear previous samples
         self.samples.lock().unwrap().clear();
@@ -63,30 +61,31 @@ impl AudioRecorder {
             self.is_recording
         );
 
-        let stream = device
-            .build_input_stream(
-                &config.into(),
-                move |data: &[f32], _| {
-                    let mut samples = samples_for_callback.lock().unwrap();
-                    for &sample in data {
-                        // Apply gain (increase volume) - adjust the multiplier as needed
-                        let amplified_sample = sample * 3.0;
+        let stream = device.build_input_stream(
+            &config.into(),
+            move |data: &[f32], _| {
+                let mut samples = samples_for_callback.lock().unwrap();
+                for &sample in data {
+                    // Apply gain (increase volume) - adjust the multiplier as needed
+                    let amplified_sample = sample * 3.0;
 
-                        // Avoids distortion
-                        let clamped_sample = amplified_sample.clamp(-1.0, 1.0);
+                    // Avoids distortion
+                    let clamped_sample = amplified_sample.clamp(-1.0, 1.0);
 
-                        // Convert f32 to i16
-                        let sample = (clamped_sample * 32767.0) as i16;
-                        samples.push(sample);
-                    }
-                },
-                |err| log::error!("An error occurred on the audio stream: {}", err),
-                None,
-            )
-            .expect("Failed to build input stream");
+                    // Convert f32 to i16
+                    let sample = (clamped_sample * 32767.0) as i16;
+                    samples.push(sample);
+                }
+            },
+            |err| log::error!("An error occurred on the audio stream: {}", err),
+            None,
+        )?;
 
-        stream.play().expect("Failed to start audio stream");
+        stream.play()?;
+
         self.stream = Some(stream);
+
+        Ok(())
     }
 
     pub fn stop_recording_and_get_bytes(&mut self) -> Option<Vec<u8>> {

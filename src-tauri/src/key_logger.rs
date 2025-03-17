@@ -19,6 +19,8 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
     let device_state = DeviceEventsHandler::new(Duration::from_millis(20))
         .context("Failed to init 'DeviceEventsHandler'")?;
 
+    log::info!("Device state initialized");
+
     let key_state_manager = Arc::new(Mutex::new(KeyStateManager::new()));
     let key_state_manager_ = Arc::clone(&key_state_manager);
 

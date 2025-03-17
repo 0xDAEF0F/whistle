@@ -4,8 +4,9 @@ use crate::{
     transcribe_icon::{Icon, TranscribeIcon},
 };
 use anyhow::Result;
-use std::{cell::RefCell, rc::Rc};
-use tauri::{AppHandle, Manager, async_runtime::spawn};
+use std::{cell::RefCell, rc::Rc, time::Duration};
+use tauri::{AppHandle, Manager};
+use tauri_plugin_notification::NotificationExt;
 use tokio::{
     sync::{mpsc, oneshot},
     task::LocalSet,
@@ -20,7 +21,8 @@ pub enum Task {
 
 /// - Instantiates its own tokio runtime
 pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandle) {
-    log::info!("Running local task handler");
+    log::info!("Starting `run_local_task_handler`");
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -28,37 +30,41 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
     let local = LocalSet::new();
 
     local.spawn_local(async move {
-        log::info!("Starting local task handler");
-        let enigo = match EnigoInstance::try_new() {
-            Ok(e) => e,
-            Err(e) => {
-                log::error!("Failed to create EnigoInstance: {}", e);
-                app_handle.exit(1);
-                return;
-            }
-        };
-        let enigo = Rc::new(RefCell::new(enigo));
+        let enigo = EnigoInstance::try_new();
+        if enigo.is_err() {
+            log::error!("Failed to create EnigoInstance");
+            _ = app_handle
+                .notification()
+                .builder()
+                .title("Error")
+                .body("Please grant accessibility permissions to the app and restart it")
+                .show();
+            app_handle.exit(1);
+        }
+        let enigo = Rc::new(RefCell::new(enigo.unwrap()));
         let audio_recorder = Rc::new(RefCell::new(AudioRecorder::new()));
-        let media_player = Rc::new(RefCell::new(MediaPlayer::new()));
+        let media_manager = Rc::new(RefCell::new(MediaManager::new()));
         while let Some(task) = rx.recv().await {
             let enigo = Rc::clone(&enigo);
             let audio_recorder = Rc::clone(&audio_recorder);
-            let media_player = Rc::clone(&media_player);
+            let media_manager = Rc::clone(&media_manager);
             tokio::task::spawn_local(async move {
                 match task {
                     Task::ToggleRecording(tx_recording, app_handle) => {
                         log::info!("ToggleRecording task received through channel");
 
                         let mut recorder = audio_recorder.borrow_mut();
-                        let mut media_player = media_player.borrow_mut();
+                        let mut media_manager = media_manager.borrow_mut();
                         let transcribe_icon = app_handle.state::<TranscribeIcon>();
 
                         if !recorder.is_recording {
-                            media_player.pause_spotify().unwrap();
+                            media_manager.pause_spotify();
                             transcribe_icon.change_icon(Icon::Recording);
-                            log::info!("calling start_recording");
-                            recorder.start_recording();
-                            log::info!("start_recording called haha");
+                            if let Err(e) = recorder.start_recording() {
+                                log::error!("Failed to start recording: {}", e);
+                                recorder.reset();
+                                return;
+                            }
                             _ = tx_recording.send(vec![]);
                             return;
                         }
@@ -70,7 +76,7 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
                             log::error!("Failed to stop recording");
                             return;
                         };
-                        media_player.play_spotify().unwrap();
+                        media_manager.play_spotify();
 
                         if tx_recording.send(recording_bytes).is_err() {
                             log::error!("Failed to send recording to channel");
@@ -93,16 +99,22 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
     log::info!("Local task handler completed");
 }
 
-struct MediaPlayer {
+struct MediaManager {
     was_playing: bool,
 }
 
-impl MediaPlayer {
+impl MediaManager {
     fn new() -> Self {
         Self { was_playing: false }
     }
 
-    fn pause_spotify(&mut self) -> Result<()> {
+    pub fn pause_spotify(&mut self) {
+        if let Err(e) = self.pause_spotify_() {
+            log::error!("Failed to pause Spotify: {}", e);
+        }
+    }
+
+    fn pause_spotify_(&mut self) -> Result<()> {
         let output = std::process::Command::new("osascript")
         .args(["-e", "tell application \"System Events\" to (name of processes) contains \"Spotify\""])
         .output()?;
@@ -123,7 +135,13 @@ impl MediaPlayer {
         Ok(())
     }
 
-    fn play_spotify(&mut self) -> Result<()> {
+    pub fn play_spotify(&mut self) {
+        if let Err(e) = self.play_spotify_() {
+            log::error!("Failed to play Spotify: {}", e);
+        }
+    }
+
+    fn play_spotify_(&mut self) -> Result<()> {
         if !self.was_playing {
             return Ok(());
         }

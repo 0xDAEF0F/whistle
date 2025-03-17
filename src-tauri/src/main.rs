@@ -29,7 +29,12 @@ use transcribe_icon::{Icon, TranscribeIcon};
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Trace)
+                .level_for("enigo", log::LevelFilter::Error)
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -79,9 +84,10 @@ fn main() {
 
             let app_handle = app.handle().clone();
             spawn(async move {
-                if let Err(e) = key_logger(app_handle).await {
+                if let Err(e) = key_logger(app_handle.clone()).await {
                     log::error!("Error on 'key_logger' task: {e}");
-                };
+                    app_handle.exit(1);
+                }
             });
 
             Ok(())
@@ -92,10 +98,8 @@ fn main() {
                 app_handle.exit(0);
             }
             "toggle_recording" => {
-                log::info!("{} event received", "ToggleRecording".green());
                 let app_handle = app_handle.clone();
                 spawn(async move {
-                    log::info!("hello world!!!!");
                     let tx_task = app_handle.state::<mpsc::Sender<Task>>();
                     let (tx_recording, rx_recording) = oneshot::channel::<Vec<u8>>();
                     if let Err(e) = tx_task
@@ -130,9 +134,20 @@ fn main() {
 
                     transcribe_icon.change_icon(Icon::Default);
 
-                    app_handle.clipboard().write_text(text).unwrap();
+                    if let Err(e) = app_handle.clipboard().write_text(text) {
+                        log::error!("Failed to write text to clipboard: {}", e);
+                        return;
+                    }
 
-                    tx_task.send(Task::PasteFromClipboard).await.unwrap();
+                    if let Err(e) = app_handle
+                        .notification()
+                        .builder()
+                        .title("Done 🎉")
+                        .body("Your transcription is ready in your clipboard")
+                        .show()
+                    {
+                        log::error!("Failed to show notification: {}", e);
+                    }
                 });
             }
             id => {

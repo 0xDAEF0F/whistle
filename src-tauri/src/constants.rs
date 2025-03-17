@@ -1,1 +1,1 @@
-pub const API_BASE_URL: &str = "http://192.168.1.187:3000";
+pub const API_BASE_URL: &str = "https://8918-187-190-95-215.ngrok-free.app";

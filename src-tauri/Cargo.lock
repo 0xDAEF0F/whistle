@@ -5791,6 +5791,7 @@ dependencies = [
  "env_logger",
  "hound",
  "log",
+ "macos-accessibility-client",
  "reqwest",
  "serde",
  "serde_json",
