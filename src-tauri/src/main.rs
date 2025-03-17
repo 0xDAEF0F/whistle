@@ -28,7 +28,6 @@ use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
 
 fn main() {
-    // transcribe_app_logger::init(log::LevelFilter::Info); // `env_logger`
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
@@ -118,7 +117,7 @@ fn main() {
                     }
 
                     let transcribe_icon = app_handle.state::<TranscribeIcon>();
-                    transcribe_icon.change_icon(Icon::Transcribing).unwrap();
+                    transcribe_icon.change_icon(Icon::Transcribing);
 
                     let transcribe_client = app_handle.state::<TranscribeClient>();
                     let result =
@@ -129,7 +128,7 @@ fn main() {
                         return;
                     };
 
-                    transcribe_icon.change_icon(Icon::Default).unwrap();
+                    transcribe_icon.change_icon(Icon::Default);
 
                     app_handle.clipboard().write_text(text).unwrap();
 

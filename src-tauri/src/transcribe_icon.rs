@@ -16,7 +16,15 @@ impl TranscribeIcon {
         Self(tray_icon)
     }
 
-    pub fn change_icon(&self, icon: Icon) -> Result<()> {
+    pub fn change_icon(&self, icon: Icon) {
+        if let Err(e) = self.change_icon_(icon) {
+            log::error!("Unable to change icon: {e}");
+        } else {
+            log::trace!("Successfully changed icon to: {icon:?}");
+        }
+    }
+
+    fn change_icon_(&self, icon: Icon) -> Result<()> {
         let img = match icon {
             Icon::Default => Image::from_bytes(include_bytes!("../icons/StoreLogo.png"))?,
             Icon::Recording => {

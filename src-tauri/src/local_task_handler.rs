@@ -55,8 +55,7 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
 
                         if !recorder.is_recording {
                             media_player.pause_spotify().unwrap();
-                            let x = transcribe_icon.change_icon(Icon::Recording);
-                            log::info!("x: {:?}", x);
+                            transcribe_icon.change_icon(Icon::Recording);
                             log::info!("calling start_recording");
                             recorder.start_recording();
                             log::info!("start_recording called haha");
@@ -64,7 +63,7 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
                             return;
                         }
 
-                        transcribe_icon.change_icon(Icon::Default).unwrap();
+                        transcribe_icon.change_icon(Icon::Default);
                         let Some(recording_bytes) =
                             recorder.stop_recording_and_get_bytes()
                         else {

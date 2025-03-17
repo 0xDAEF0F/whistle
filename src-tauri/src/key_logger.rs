@@ -53,10 +53,7 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
                     return;
                 }
 
-                app_handle
-                    .state::<TranscribeIcon>()
-                    .change_icon(Icon::Transcribing)
-                    .unwrap();
+                app_handle.state::<TranscribeIcon>().change_icon(Icon::Transcribing);
 
                 log::debug!(
                     "Sending recording to API. Bytes: {}",
@@ -88,10 +85,7 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
 
                 log::trace!("Successfully wrote text to clipboard");
 
-                app_handle
-                    .state::<TranscribeIcon>()
-                    .change_icon(Icon::Default)
-                    .unwrap();
+                app_handle.state::<TranscribeIcon>().change_icon(Icon::Default);
 
                 let tx_task = app_handle.state::<mpsc::Sender<Task>>();
                 tx_task.send(Task::PasteFromClipboard).await.unwrap();
@@ -106,7 +100,7 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
             *is_cleansing = true;
             drop(is_cleansing);
 
-            _ = app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
+            app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
 
             let original_text =
                 app_handle.clipboard().read_text().expect("Failed to read clipboard");
@@ -135,7 +129,7 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
 
                 tx_task.send(Task::PasteFromClipboard).await.unwrap();
 
-                _ = app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
+                app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
 
                 let is_cleansing = app_handle_.state::<Arc<Mutex<bool>>>();
                 *is_cleansing.lock().unwrap() = false;
