@@ -18,10 +18,16 @@ impl TranscribeIcon {
 
     pub fn change_icon(&self, icon: Icon) -> Result<()> {
         let img = match icon {
-            Icon::Default => Image::from_path("icons/StoreLogo.png")?, // TODO
-            Icon::Recording => Image::from_path("icons/recording-icon.png")?,
-            Icon::Transcribing => Image::from_path("icons/transcribing-icon.png")?,
-            Icon::Cleansing => Image::from_path("icons/transcribing-icon.png")?, // TODO
+            Icon::Default => Image::from_bytes(include_bytes!("../icons/StoreLogo.png"))?,
+            Icon::Recording => {
+                Image::from_bytes(include_bytes!("../icons/recording-icon.png"))?
+            }
+            Icon::Transcribing => {
+                Image::from_bytes(include_bytes!("../icons/transcribing-icon.png"))?
+            }
+            Icon::Cleansing => {
+                Image::from_bytes(include_bytes!("../icons/transcribing-icon.png"))?
+            }
         };
 
         self.0.set_icon(Some(img))?;
