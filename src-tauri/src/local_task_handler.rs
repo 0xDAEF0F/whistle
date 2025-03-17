@@ -19,16 +19,25 @@ pub enum Task {
 }
 
 /// - Instantiates its own tokio runtime
-pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>) {
+pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandle) {
+    log::info!("Running local task handler");
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("Failed to create tokio runtime");
     let local = LocalSet::new();
+
     local.spawn_local(async move {
-        let enigo = Rc::new(RefCell::new(
-            EnigoInstance::try_new().expect("Failed to create EnigoInstance"),
-        ));
+        log::info!("Starting local task handler");
+        let enigo = match EnigoInstance::try_new() {
+            Ok(e) => e,
+            Err(e) => {
+                log::error!("Failed to create EnigoInstance: {}", e);
+                app_handle.exit(1);
+                return;
+            }
+        };
+        let enigo = Rc::new(RefCell::new(enigo));
         let audio_recorder = Rc::new(RefCell::new(AudioRecorder::new()));
         let media_player = Rc::new(RefCell::new(MediaPlayer::new()));
         while let Some(task) = rx.recv().await {
@@ -38,10 +47,7 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>) {
             tokio::task::spawn_local(async move {
                 match task {
                     Task::ToggleRecording(tx_recording, app_handle) => {
-                        // spawn(async move {
-                        //     use colored::*;
-                        //     log::info!("{}", "hello".green());
-                        // });
+                        log::info!("ToggleRecording task received through channel");
 
                         let mut recorder = audio_recorder.borrow_mut();
                         let mut media_player = media_player.borrow_mut();
@@ -49,8 +55,11 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>) {
 
                         if !recorder.is_recording {
                             media_player.pause_spotify().unwrap();
-                            transcribe_icon.change_icon(Icon::Recording).unwrap();
+                            let x = transcribe_icon.change_icon(Icon::Recording);
+                            log::info!("x: {:?}", x);
+                            log::info!("calling start_recording");
                             recorder.start_recording();
+                            log::info!("start_recording called haha");
                             _ = tx_recording.send(vec![]);
                             return;
                         }
@@ -79,7 +88,10 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>) {
             });
         }
     });
+
+    log::info!("Blocking on local task handler");
     rt.block_on(local);
+    log::info!("Local task handler completed");
 }
 
 struct MediaPlayer {

@@ -28,22 +28,23 @@ use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
 
 fn main() {
-    transcribe_app_logger::init(log::LevelFilter::Info); // `env_logger`
-
-    // Channel for sending tasks to the local task handler
-    let (localtask_tx, localtask_rx) = mpsc::channel::<Task>(1);
-
-    // Spawn a thread for the `LocalSet` to run on since
-    // `Enigo` and `AudioRecorder` are not `Send` nor `Sync`
-    std::thread::spawn(move || {
-        run_local_task_handler(localtask_rx);
-    });
-
+    // transcribe_app_logger::init(log::LevelFilter::Info); // `env_logger`
     tauri::Builder::default()
+        .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
+            // Channel for sending tasks to the local task handler
+            let (localtask_tx, localtask_rx) = mpsc::channel::<Task>(1);
+
+            // Spawn a thread for the `LocalSet` to run on since
+            // `Enigo` and `AudioRecorder` are not `Send` nor `Sync`
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                run_local_task_handler(localtask_rx, app_handle);
+            });
 
             app.notification()
                 .builder()
@@ -92,8 +93,10 @@ fn main() {
                 app_handle.exit(0);
             }
             "toggle_recording" => {
+                log::info!("{} event received", "ToggleRecording".green());
                 let app_handle = app_handle.clone();
                 spawn(async move {
+                    log::info!("hello world!!!!");
                     let tx_task = app_handle.state::<mpsc::Sender<Task>>();
                     let (tx_recording, rx_recording) = oneshot::channel::<Vec<u8>>();
                     if let Err(e) = tx_task

@@ -33,9 +33,18 @@ impl AudioRecorder {
 
         log::debug!("'AudioRecorder' starting to record!");
 
+        let host = cpal::default_host();
+        let devices = host.devices().unwrap();
+
+        for device in devices {
+            log::info!("Device: {:?}", device.name().unwrap());
+        }
+
         let device = cpal::default_host()
             .default_input_device()
             .expect("No input device available");
+        println!("Device: {:?}", device.name());
+
         let config = device.default_input_config().unwrap();
 
         // Store audio format information

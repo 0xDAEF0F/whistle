@@ -4,7 +4,7 @@
 <dict>
   <key>NSMicrophoneUsageDescription</key>
   <string>We need to access your microphone for transcription</string>
-  <key>NSSystemExtensionUsageDescription</key>
-  <string>This app requires system extension access to capture audio output.</string>
+  <key>NSAppleEventsUsageDescription</key>
+  <string>This app needs to control other applications to automate your workflow.</string>
 </dict>
 </plist>
