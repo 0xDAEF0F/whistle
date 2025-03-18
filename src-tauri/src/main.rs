@@ -16,10 +16,10 @@ use key_logger::key_logger;
 use local_task_handler::{Task, run_local_task_handler};
 use std::sync::{Arc, Mutex};
 use tauri::{
-    Manager,
+    AppHandle, Manager,
     async_runtime::spawn,
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_notification::NotificationExt;
@@ -31,7 +31,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Trace)
+                .level(log::LevelFilter::Debug)
                 .level_for("enigo", log::LevelFilter::Error)
                 .build(),
         )
@@ -69,6 +69,7 @@ fn main() {
 
             let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
+                .show_menu_on_left_click(false)
                 .menu(&menu)
                 .build(app)?;
 
@@ -92,63 +93,31 @@ fn main() {
 
             Ok(())
         })
+        .on_tray_icon_event(|app_handle, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Right,
+                button_state: MouseButtonState::Down,
+                ..
+            } => {
+                log::info!("Tray icon right clicked");
+                _ = app_handle.show_menu();
+            }
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Down,
+                ..
+            } => {
+                toggle_recording(app_handle.clone(), true);
+            }
+            _ => {}
+        })
         .on_menu_event(|app_handle, event| match event.id.as_ref() {
             "quit" => {
                 log::info!("{} application on user's request", "Quitting".red());
                 app_handle.exit(0);
             }
             "toggle_recording" => {
-                let app_handle = app_handle.clone();
-                spawn(async move {
-                    let tx_task = app_handle.state::<mpsc::Sender<Task>>();
-                    let (tx_recording, rx_recording) = oneshot::channel::<Vec<u8>>();
-                    if let Err(e) = tx_task
-                        .send(Task::ToggleRecording(tx_recording, app_handle.clone()))
-                        .await
-                    {
-                        log::error!(
-                            "Failed to send 'ToggleRecording' task to channel: {}",
-                            e
-                        );
-                        return;
-                    };
-
-                    let recording_bytes = rx_recording.await.unwrap();
-
-                    if recording_bytes.is_empty() {
-                        log::info!("Starting recording");
-                        return;
-                    }
-
-                    let transcribe_icon = app_handle.state::<TranscribeIcon>();
-                    transcribe_icon.change_icon(Icon::Transcribing);
-
-                    let transcribe_client = app_handle.state::<TranscribeClient>();
-                    let result =
-                        transcribe_client.fetch_transcription(recording_bytes).await;
-
-                    let Ok(text) = result else {
-                        log::error!("Failed to fetch transcription from API");
-                        return;
-                    };
-
-                    transcribe_icon.change_icon(Icon::Default);
-
-                    if let Err(e) = app_handle.clipboard().write_text(text) {
-                        log::error!("Failed to write text to clipboard: {}", e);
-                        return;
-                    }
-
-                    if let Err(e) = app_handle
-                        .notification()
-                        .builder()
-                        .title("Done 🎉")
-                        .body("Your transcription is ready in your clipboard")
-                        .show()
-                    {
-                        log::error!("Failed to show notification: {}", e);
-                    }
-                });
+                toggle_recording(app_handle.clone(), false);
             }
             id => {
                 log::warn!("Unknown menu event: {}", id);
@@ -157,4 +126,74 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
+    spawn(async move {
+        let tx_task = app_handle.state::<mpsc::Sender<Task>>();
+        let (tx_recording, rx_recording) = oneshot::channel::<Vec<u8>>();
+
+        if let Err(e) = tx_task
+            .send(Task::ToggleRecording(tx_recording, app_handle.clone()))
+            .await
+        {
+            log::error!("Failed to send 'ToggleRecording' task to channel: {}", e);
+            return;
+        };
+
+        let recording_bytes = match rx_recording.await {
+            Ok(bytes) => {
+                if bytes.is_empty() {
+                    log::info!("Starting recording");
+                    return;
+                }
+                bytes
+            }
+            Err(e) => {
+                log::error!(
+                    "Failed to receive 'ToggleRecording' task from channel: {}",
+                    e
+                );
+                return;
+            }
+        };
+
+        let transcribe_icon = app_handle.state::<TranscribeIcon>();
+        transcribe_icon.change_icon(Icon::Transcribing);
+
+        let transcribe_client = app_handle.state::<TranscribeClient>();
+        let result = transcribe_client.fetch_transcription(recording_bytes).await;
+
+        transcribe_icon.change_icon(Icon::Default);
+
+        let Ok(text) = result else {
+            log::error!("Failed to fetch transcription from API");
+            return;
+        };
+
+        if let Err(e) = app_handle.clipboard().write_text(text) {
+            log::error!("Failed to write text to clipboard: {}", e);
+            return;
+        }
+
+        if let Err(e) = app_handle
+            .notification()
+            .builder()
+            .title("Done 🎉")
+            .body("Your transcription is ready in your clipboard")
+            .show()
+        {
+            log::error!("Failed to show notification: {}", e);
+        }
+
+        if !paste_from_clipboard {
+            return;
+        }
+
+        if let Err(e) = tx_task.send(Task::PasteFromClipboard).await {
+            log::error!("Failed to send 'PasteFromClipboard' task to channel: {}", e);
+        } else {
+            log::info!("Successfully pasted text from clipboard");
+        }
+    });
 }
