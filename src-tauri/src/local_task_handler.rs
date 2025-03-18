@@ -1,12 +1,11 @@
 use crate::{
     audio_recorder::AudioRecorder,
     enigo_instance::EnigoInstance,
-    transcribe_icon::{Icon, TranscribeIcon},
+    notifications::{AppNotifications, Notification},
 };
 use anyhow::Result;
-use std::{cell::RefCell, rc::Rc, time::Duration};
-use tauri::{AppHandle, Manager};
-use tauri_plugin_notification::NotificationExt;
+use std::{cell::RefCell, rc::Rc};
+use tauri::AppHandle;
 use tokio::{
     sync::{mpsc, oneshot},
     task::LocalSet,
@@ -33,12 +32,7 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
         let enigo = EnigoInstance::try_new();
         if enigo.is_err() {
             log::error!("Failed to create EnigoInstance");
-            _ = app_handle
-                .notification()
-                .builder()
-                .title("Error")
-                .body("Please grant accessibility permissions to the app and restart it")
-                .show();
+            AppNotifications::new(&app_handle).notify(Notification::AccessibilityError);
             app_handle.exit(1);
         }
         let enigo = Rc::new(RefCell::new(enigo.unwrap()));

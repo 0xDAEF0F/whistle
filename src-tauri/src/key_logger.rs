@@ -1,4 +1,5 @@
 use crate::{
+    cleanse_clipboard,
     key_state_manager::{KeyStateManager, TranscribeAction},
     local_task_handler::Task,
     toggle_recording,
@@ -43,50 +44,7 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
         if let TranscribeAction::TranscribeEnglish = action {
             toggle_recording(app_handle.clone(), true);
         } else if let TranscribeAction::CleanseTranscription = action {
-            let is_cleansing_m = app_handle.state::<Arc<Mutex<bool>>>();
-            let mut is_cleansing = is_cleansing_m.lock().unwrap();
-            if *is_cleansing {
-                log::warn!("Already cleansing. Skipping.");
-                return;
-            }
-            *is_cleansing = true;
-            drop(is_cleansing);
-
-            app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
-
-            let original_text =
-                app_handle.clipboard().read_text().expect("Failed to read clipboard");
-            log::info!("Starting cleanse of: {}", original_text.to_string().yellow());
-
-            let app_handle_ = app_handle.clone();
-            spawn(async move {
-                let transcribe_client = app_handle_
-                    .try_state::<TranscribeClient>()
-                    .expect("Failed to retrieve 'TranscribeClient' (not managed)");
-
-                let cleansed_text = transcribe_client
-                    .clean_transcription(original_text)
-                    .await
-                    .expect("Failed to clean transcription");
-                log::info!("Cleansed text: {}", cleansed_text.to_string().yellow());
-
-                let tx_task = app_handle_.state::<mpsc::Sender<Task>>();
-                let (tx_undo, rx_undo) = oneshot::channel::<()>();
-
-                tx_task.send(Task::UndoText(tx_undo)).await.unwrap();
-
-                let _ = rx_undo.await;
-
-                app_handle_.clipboard().write_text(cleansed_text).unwrap();
-
-                tx_task.send(Task::PasteFromClipboard).await.unwrap();
-
-                app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
-
-                let is_cleansing = app_handle_.state::<Arc<Mutex<bool>>>();
-                *is_cleansing.lock().unwrap() = false;
-                log::info!("Cleansing complete. Set 'IsCleansing' to false");
-            });
+            cleanse_clipboard(app_handle.clone(), true);
         }
     });
 
