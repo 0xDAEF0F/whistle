@@ -128,23 +128,23 @@ fn main() {
         .expect("error while running tauri application");
 }
 
-fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
+pub fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
     spawn(async move {
         let tx_task = app_handle.state::<mpsc::Sender<Task>>();
         let (tx_recording, rx_recording) = oneshot::channel::<Vec<u8>>();
 
-        if let Err(e) = tx_task
-            .send(Task::ToggleRecording(tx_recording, app_handle.clone()))
-            .await
-        {
+        if let Err(e) = tx_task.send(Task::ToggleRecording(tx_recording)).await {
             log::error!("Failed to send 'ToggleRecording' task to channel: {}", e);
             return;
         };
+
+        let transcribe_icon = app_handle.state::<TranscribeIcon>();
 
         let recording_bytes = match rx_recording.await {
             Ok(bytes) => {
                 if bytes.is_empty() {
                     log::info!("Starting recording");
+                    transcribe_icon.change_icon(Icon::Recording);
                     return;
                 }
                 bytes
@@ -154,11 +154,11 @@ fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
                     "Failed to receive 'ToggleRecording' task from channel: {}",
                     e
                 );
+                transcribe_icon.change_icon(Icon::Default);
                 return;
             }
         };
 
-        let transcribe_icon = app_handle.state::<TranscribeIcon>();
         transcribe_icon.change_icon(Icon::Transcribing);
 
         let transcribe_client = app_handle.state::<TranscribeClient>();
@@ -170,6 +170,8 @@ fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
             log::error!("Failed to fetch transcription from API");
             return;
         };
+
+        log::info!("Transcription text: {}", text.yellow());
 
         if let Err(e) = app_handle.clipboard().write_text(text) {
             log::error!("Failed to write text to clipboard: {}", e);

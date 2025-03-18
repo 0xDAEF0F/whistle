@@ -14,7 +14,7 @@ use tokio::{
 
 /// Tasks that will only be run on a `LocalSet`
 pub enum Task {
-    ToggleRecording(oneshot::Sender<Vec<u8>>, AppHandle),
+    ToggleRecording(oneshot::Sender<Vec<u8>>),
     PasteFromClipboard,
     UndoText(oneshot::Sender<()>),
 }
@@ -50,16 +50,14 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
             let media_manager = Rc::clone(&media_manager);
             tokio::task::spawn_local(async move {
                 match task {
-                    Task::ToggleRecording(tx_recording, app_handle) => {
+                    Task::ToggleRecording(tx_recording) => {
                         log::info!("ToggleRecording task received through channel");
 
                         let mut recorder = audio_recorder.borrow_mut();
                         let mut media_manager = media_manager.borrow_mut();
-                        let transcribe_icon = app_handle.state::<TranscribeIcon>();
 
                         if !recorder.is_recording {
                             media_manager.pause_spotify();
-                            transcribe_icon.change_icon(Icon::Recording);
                             if let Err(e) = recorder.start_recording() {
                                 log::error!("Failed to start recording: {}", e);
                                 recorder.reset();
@@ -69,7 +67,6 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
                             return;
                         }
 
-                        transcribe_icon.change_icon(Icon::Default);
                         let Some(recording_bytes) =
                             recorder.stop_recording_and_get_bytes()
                         else {

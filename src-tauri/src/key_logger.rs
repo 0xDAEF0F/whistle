@@ -1,6 +1,7 @@
 use crate::{
     key_state_manager::{KeyStateManager, TranscribeAction},
     local_task_handler::Task,
+    toggle_recording,
     transcribe_client::TranscribeClient,
     transcribe_icon::{Icon, TranscribeIcon},
 };
@@ -40,58 +41,7 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
         drop(keys_pressed);
 
         if let TranscribeAction::TranscribeEnglish = action {
-            let app_handle = app_handle.clone();
-            let (tx_recording, rx_recording) = oneshot::channel::<Vec<u8>>();
-            spawn(async move {
-                let tx_task = app_handle.state::<mpsc::Sender<Task>>();
-                tx_task
-                    .send(Task::ToggleRecording(tx_recording, app_handle.clone()))
-                    .await
-                    .unwrap();
-
-                let recording_bytes = rx_recording.await.unwrap();
-
-                if recording_bytes.is_empty() {
-                    return;
-                }
-
-                app_handle.state::<TranscribeIcon>().change_icon(Icon::Transcribing);
-
-                log::debug!(
-                    "Sending recording to API. Bytes: {}",
-                    recording_bytes.len().to_string().yellow()
-                );
-
-                let transcribe_client = app_handle.state::<TranscribeClient>();
-
-                let transcription = transcribe_client
-                    .fetch_transcription(recording_bytes)
-                    .await
-                    .map_err(|e| {
-                        log::error!("Failed to call API: {}", e);
-                    })
-                    .unwrap();
-
-                log::info!(
-                    "Writing text to clipboard: {}",
-                    transcription.to_string().yellow()
-                );
-
-                app_handle
-                    .clipboard()
-                    .write_text(transcription)
-                    .map_err(|e| {
-                        log::error!("Failed to write to clipboard: {}", e);
-                    })
-                    .unwrap();
-
-                log::trace!("Successfully wrote text to clipboard");
-
-                app_handle.state::<TranscribeIcon>().change_icon(Icon::Default);
-
-                let tx_task = app_handle.state::<mpsc::Sender<Task>>();
-                tx_task.send(Task::PasteFromClipboard).await.unwrap();
-            });
+            toggle_recording(app_handle.clone(), true);
         } else if let TranscribeAction::CleanseTranscription = action {
             let is_cleansing_m = app_handle.state::<Arc<Mutex<bool>>>();
             let mut is_cleansing = is_cleansing_m.lock().unwrap();
