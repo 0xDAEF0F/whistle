@@ -29,6 +29,11 @@ use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
 
+#[tauri::command]
+fn greet(name: &str) -> String {
+    format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(
@@ -39,8 +44,8 @@ fn main() {
         )
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            // #[cfg(target_os = "macos")]
+            // app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // Channel for sending tasks to the local task handler
             let (localtask_tx, localtask_rx) = mpsc::channel::<Task>(1);
@@ -123,6 +128,12 @@ fn main() {
             }
             _ => {}
         })
+        .on_window_event(|window, event| {
+            log::info!("Window event received: {:?}", event);
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                log::info!("Window close requested");
+            }
+        })
         .on_menu_event(|app_handle, event| {
             log::info!("Menu event received: {:?}", event.id);
             match event.id.as_ref() {
@@ -141,6 +152,7 @@ fn main() {
                 }
             }
         })
+        .invoke_handler(tauri::generate_handler![greet])
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
