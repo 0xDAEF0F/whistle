@@ -110,30 +110,35 @@ fn main() {
                 ..
             } => {
                 log::info!("Tray icon right clicked");
-                _ = app_handle.show_menu();
+                if let Err(e) = app_handle.show_menu() {
+                    log::error!("Failed to show menu: {}", e);
+                }
             }
             TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Down,
                 ..
             } => {
-                toggle_recording(app_handle.clone(), true);
+                toggle_recording(app_handle.clone(), false);
             }
             _ => {}
         })
-        .on_menu_event(|app_handle, event| match event.id.as_ref() {
-            "quit" => {
-                log::info!("{} application on user's request", "Quitting".red());
-                app_handle.exit(0);
-            }
-            "toggle_recording" => {
-                toggle_recording(app_handle.clone(), false);
-            }
-            "cleanse" => {
-                cleanse_clipboard(app_handle.clone(), false);
-            }
-            id => {
-                log::warn!("Unknown menu event: {}", id);
+        .on_menu_event(|app_handle, event| {
+            log::info!("Menu event received: {:?}", event.id);
+            match event.id.as_ref() {
+                "quit" => {
+                    log::info!("{} application on user's request", "Quitting".red());
+                    app_handle.exit(0);
+                }
+                "toggle_recording" => {
+                    toggle_recording(app_handle.clone(), false);
+                }
+                "cleanse" => {
+                    cleanse_clipboard(app_handle.clone(), false);
+                }
+                id => {
+                    log::warn!("Unknown menu event: {}", id);
+                }
             }
         })
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -202,6 +207,7 @@ pub fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
         } else {
             log::info!("Successfully pasted text from clipboard");
         }
+        log::info!("exiting toggle recording function");
     });
 }
 

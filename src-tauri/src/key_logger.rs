@@ -42,9 +42,9 @@ pub async fn key_logger(app_handle: AppHandle) -> Result<()> {
         drop(keys_pressed);
 
         if let TranscribeAction::TranscribeEnglish = action {
-            toggle_recording(app_handle.clone(), true);
+            toggle_recording(app_handle.clone(), false);
         } else if let TranscribeAction::CleanseTranscription = action {
-            cleanse_clipboard(app_handle.clone(), true);
+            cleanse_clipboard(app_handle.clone(), false);
         }
     });
 
