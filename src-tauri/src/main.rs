@@ -3,8 +3,6 @@
 mod audio_recorder;
 mod constants;
 mod enigo_instance;
-mod key_logger;
-mod key_state_manager;
 mod local_task_handler;
 mod notifications;
 mod transcribe_app_logger;
@@ -13,21 +11,18 @@ mod transcribe_icon;
 
 use anyhow::Context;
 use colored::*;
-use key_logger::key_logger;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
 use std::sync::{Arc, Mutex};
 use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,
-    menu::{Menu, MenuBuilder, MenuItem, Submenu},
+    menu::{MenuBuilder, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tauri_plugin_global_shortcut::{
-    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
-};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
@@ -59,14 +54,14 @@ fn main() {
                 .with_handler(move |app, shortcut, event| {
                     // Check if the shortcut matches F19
                     if shortcut == &f19_shortcut
-                        && event.state() == ShortcutState::Released
+                        && event.state() == ShortcutState::Pressed
                     {
                         log::info!("F19 shortcut triggered - Start/Stop Recording");
                         toggle_recording(app.clone(), false);
                     }
                     // Check if the shortcut matches F20
                     else if shortcut == &f20_shortcut
-                        && event.state() == ShortcutState::Released
+                        && event.state() == ShortcutState::Pressed
                     {
                         log::info!("F20 shortcut triggered - Polish Clipboard");
                         cleanse_clipboard(app.clone(), false);
@@ -153,17 +148,6 @@ fn main() {
                 app.global_shortcut().register(f19_shortcut)?;
                 app.global_shortcut().register(f20_shortcut)?;
             }
-
-            // Comment out the key_logger for now, but keep it in the codebase
-            /*
-            let app_handle = app.handle().clone();
-            spawn(async move {
-                if let Err(e) = key_logger(app_handle.clone()).await {
-                    log::error!("Error on 'key_logger' task: {e}");
-                    app_handle.exit(1);
-                }
-            });
-            */
 
             Ok(())
         })
