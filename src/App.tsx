@@ -1,50 +1,38 @@
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import "./App.css";
+import Shortcuts from "./Shortcuts";
+import MessageDisplay from "./MessageDisplay";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [messages, setMessages] = useState<string[]>([]);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
-  }
+  const handleMessage = (message: string) => {
+    setMessages((prev) => [message, ...prev].slice(0, 50)); // Keep last 50 messages
+  };
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vitejs.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://reactjs.org" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div style={{ padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
+      <h1>Global Shortcuts Demo</h1>
+      <div style={{ marginBottom: "20px" }}>
+        <p>
+          Register global shortcuts that will work even when the app is in the
+          background. Try using combinations like{" "}
+          <code>CommandOrControl+Shift+K</code>.
+        </p>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
+      <div
+        style={{
+          border: "1px solid #ddd",
+          padding: "20px",
+          borderRadius: "8px",
         }}
       >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+        <h2>Manage Shortcuts</h2>
+        <Shortcuts onMessage={handleMessage} />
+      </div>
+
+      <MessageDisplay messages={messages} />
+    </div>
   );
 }
 

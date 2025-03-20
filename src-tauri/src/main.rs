@@ -35,6 +35,7 @@ fn greet(name: &str) -> String {
 
 fn main() {
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
