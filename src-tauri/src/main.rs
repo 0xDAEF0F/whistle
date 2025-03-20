@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuBuilder, MenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -44,6 +44,7 @@ fn main() {
         )
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // TODO: Add activation policy for macos for app run background
             // #[cfg(target_os = "macos")]
             // app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
@@ -64,23 +65,24 @@ fn main() {
                 .show()
                 .unwrap();
 
-            let toggle_recording_i = MenuItem::with_id(
-                app,
-                "toggle_recording",
-                "Toggle Recording 🎤",
-                true,
-                None::<&str>,
-            )?;
-            let cleanse_i = MenuItem::with_id(
-                app,
-                "cleanse",
-                "Polish clipboard 💅",
-                true,
-                None::<&str>,
-            )?;
-            let quit_i = MenuItem::with_id(app, "quit", "Quit ✌️", true, None::<&str>)?;
-            let menu =
-                Menu::with_items(app, &[&toggle_recording_i, &cleanse_i, &quit_i])?;
+            let menu = MenuBuilder::new(app)
+                .item(&MenuItem::with_id(
+                    app,
+                    "toggle_recording",
+                    "Toggle Recording",
+                    true,
+                    None::<&str>,
+                )?)
+                .item(&MenuItem::with_id(
+                    app,
+                    "cleanse",
+                    "Polish clipboard",
+                    true,
+                    None::<&str>,
+                )?)
+                .separator()
+                .item(&MenuItem::with_id(app, "quit", "Quit app", true, None::<&str>)?)
+                .build()?;
 
             let tray_icon = TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -130,7 +132,9 @@ fn main() {
         })
         .on_window_event(|window, event| {
             log::info!("Window event received: {:?}", event);
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                window.hide().unwrap();
+                api.prevent_close();
                 log::info!("Window close requested");
             }
         })
