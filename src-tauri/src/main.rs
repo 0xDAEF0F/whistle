@@ -24,6 +24,10 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri_plugin_global_shortcut::{
+    Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
+};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
@@ -35,14 +39,44 @@ fn greet(name: &str) -> String {
 }
 
 fn main() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
                 .level_for("enigo", log::LevelFilter::Error)
                 .build(),
         )
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        // Create the shortcut objects for F19 and F20
+        let f19_shortcut = Shortcut::new(None, Code::F19);
+        let f20_shortcut = Shortcut::new(None, Code::F20);
+
+        builder = builder.plugin(
+            tauri_plugin_global_shortcut::Builder::default()
+                .with_handler(move |app, shortcut, event| {
+                    // Check if the shortcut matches F19
+                    if shortcut == &f19_shortcut
+                        && event.state() == ShortcutState::Released
+                    {
+                        log::info!("F19 shortcut triggered - Start/Stop Recording");
+                        toggle_recording(app.clone(), false);
+                    }
+                    // Check if the shortcut matches F20
+                    else if shortcut == &f20_shortcut
+                        && event.state() == ShortcutState::Released
+                    {
+                        log::info!("F20 shortcut triggered - Polish Clipboard");
+                        cleanse_clipboard(app.clone(), false);
+                    }
+                })
+                .build(),
+        );
+    }
+
+    builder
         .setup(|app| {
             // TODO: Add activation policy for macos for app run background
             // #[cfg(target_os = "macos")]
@@ -108,6 +142,20 @@ fn main() {
 
             log::info!("Successfully managed app state");
 
+            // Register global shortcuts instead of using key_logger
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                // Create the shortcut objects for F19 and F20
+                let f19_shortcut = Shortcut::new(None, Code::F19);
+                let f20_shortcut = Shortcut::new(None, Code::F20);
+
+                // Register the shortcuts
+                app.global_shortcut().register(f19_shortcut)?;
+                app.global_shortcut().register(f20_shortcut)?;
+            }
+
+            // Comment out the key_logger for now, but keep it in the codebase
+            /*
             let app_handle = app.handle().clone();
             spawn(async move {
                 if let Err(e) = key_logger(app_handle.clone()).await {
@@ -115,6 +163,7 @@ fn main() {
                     app_handle.exit(1);
                 }
             });
+            */
 
             Ok(())
         })
