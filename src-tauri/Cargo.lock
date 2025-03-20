@@ -5819,6 +5819,7 @@ dependencies = [
  "colored",
  "cpal",
  "device_query",
+ "dirs",
  "enigo",
  "env_logger",
  "hound",

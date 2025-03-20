@@ -9,19 +9,22 @@ mod transcribe_app_logger;
 mod transcribe_client;
 mod transcribe_icon;
 
-use anyhow::Context;
+use anyhow::{Context, Result};
 use colored::*;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
+use serde::Deserialize;
+use std::fs::read_to_string;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,
     menu::{MenuBuilder, MenuItem},
+    path::{BaseDirectory, PathResolver},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{mpsc, oneshot};
@@ -33,47 +36,75 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+#[derive(Debug, Deserialize)]
+struct ShortcutsConfig {
+    toggle_recording: Shortcut,
+    cleanse_clipboard: Shortcut,
+}
+
+impl Default for ShortcutsConfig {
+    fn default() -> Self {
+        Self {
+            toggle_recording: Shortcut::from_str("CmdOrCtrl+Option+R").unwrap(),
+            cleanse_clipboard: Shortcut::from_str("CmdOrCtrl+Option+C").unwrap(),
+        }
+    }
+}
+
+fn parse_shortcuts_config() -> Result<ShortcutsConfig> {
+    let config_dir = dirs::home_dir()
+        .context("Could not find home directory")?
+        .join(".config/whistle/shortcuts.json");
+    let file_contents = read_to_string(config_dir)?;
+    let config: ShortcutsConfig = serde_json::from_str(&file_contents)?;
+    Ok(config)
+}
+
 fn main() {
-    let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+    tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
                 .level_for("enigo", log::LevelFilter::Error)
                 .build(),
         )
-        .plugin(tauri_plugin_notification::init());
-
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        // Create the shortcut objects for F19 and F20
-        let f19_shortcut = Shortcut::new(None, Code::F19);
-        let f20_shortcut = Shortcut::new(None, Code::F20);
-
-        builder = builder.plugin(
-            tauri_plugin_global_shortcut::Builder::default()
-                .with_handler(move |app, shortcut, event| {
-                    // Check if the shortcut matches F19
-                    if shortcut == &f19_shortcut
-                        && event.state() == ShortcutState::Pressed
-                    {
-                        log::info!("F19 shortcut triggered - Start/Stop Recording");
-                        toggle_recording(app.clone(), false);
-                    }
-                    // Check if the shortcut matches F20
-                    else if shortcut == &f20_shortcut
-                        && event.state() == ShortcutState::Pressed
-                    {
-                        log::info!("F20 shortcut triggered - Polish Clipboard");
-                        cleanse_clipboard(app.clone(), false);
-                    }
-                })
-                .build(),
-        );
-    }
-
-    builder
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            #[cfg(desktop)]
+            {
+                let ShortcutsConfig {
+                    toggle_recording: toggle_recording_shortcut,
+                    cleanse_clipboard: cleanse_clipboard_shortcut,
+                } = parse_shortcuts_config().unwrap_or_default();
+
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::default()
+                        .with_handler(move |app, shortcut, event| {
+                            if shortcut == &toggle_recording_shortcut
+                                && event.state() == ShortcutState::Pressed
+                            {
+                                log::info!(
+                                    "F19 shortcut triggered - Start/Stop Recording"
+                                );
+                                toggle_recording(app.clone(), false);
+                            }
+                            // Check if the shortcut matches F20
+                            else if shortcut == &cleanse_clipboard_shortcut
+                                && event.state() == ShortcutState::Pressed
+                            {
+                                log::info!("F20 shortcut triggered - Polish Clipboard");
+                                cleanse_clipboard(app.clone(), false);
+                            }
+                        })
+                        .build(),
+                )?;
+                app.global_shortcut().register_multiple([
+                    toggle_recording_shortcut,
+                    cleanse_clipboard_shortcut,
+                ])?;
+                log::info!("Registered global shortcuts");
+            }
+
             // TODO: Add activation policy for macos for app run background
             // #[cfg(target_os = "macos")]
             // app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -137,18 +168,6 @@ fn main() {
                 .context("Failed to manage app state")?;
 
             log::info!("Successfully managed app state");
-
-            // Register global shortcuts instead of using key_logger
-            #[cfg(not(any(target_os = "android", target_os = "ios")))]
-            {
-                // Create the shortcut objects for F19 and F20
-                let f19_shortcut = Shortcut::new(None, Code::F19);
-                let f20_shortcut = Shortcut::new(None, Code::F20);
-
-                // Register the shortcuts
-                app.global_shortcut().register(f19_shortcut)?;
-                app.global_shortcut().register(f20_shortcut)?;
-            }
 
             Ok(())
         })
