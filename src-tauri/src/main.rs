@@ -81,6 +81,14 @@ fn main() {
                     None::<&str>,
                 )?)
                 .separator()
+                .item(&MenuItem::with_id(
+                    app,
+                    "open_window",
+                    "Open Window",
+                    true,
+                    None::<&str>,
+                )?)
+                .separator()
                 .item(&MenuItem::with_id(app, "quit", "Quit app", true, None::<&str>)?)
                 .build()?;
 
@@ -150,6 +158,15 @@ fn main() {
                 }
                 "cleanse" => {
                     cleanse_clipboard(app_handle.clone(), false);
+                }
+                "open_window" => {
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        if let Err(e) = window.show().and_then(|_| window.set_focus()) {
+                            log::error!("Failed to show and focus window: {}", e);
+                        }
+                    } else {
+                        log::error!("Failed to get webview window");
+                    }
                 }
                 id => {
                     log::warn!("Unknown menu event: {}", id);
