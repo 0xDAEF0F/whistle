@@ -15,7 +15,7 @@ export default function Shortcuts({ onMessage }: ShortcutsProps) {
   const register = () => {
     const shortcut_ = shortcut;
     registerShortcut(shortcut_, (e: any) => {
-      onMessage(`Shortcut ${shortcut_} triggered ${e.state}`);
+      onMessage(`Shortcut ${shortcut_} ${e.state}`);
     })
       .then(() => {
         setShortcuts((prev) => [...prev, shortcut_]);
@@ -56,6 +56,20 @@ export default function Shortcuts({ onMessage }: ShortcutsProps) {
           Register
         </button>
       </div>
+      <div>
+        <p style={{ margin: 0 }}>Notes:</p>
+        <ul style={{ margin: 0, padding: "0 0 0 20px" }}>
+          <li>Capitalization does not matter</li>
+          <li>
+            Common keys: <code>cmd</code>, <code>ctrl</code>, <code>shift</code>
+            , <code>alt</code>
+          </li>
+          <li>
+            Separate keys with: <code>+</code>
+          </li>
+        </ul>
+      </div>
+      <hr />
       <br />
       <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
         {shortcuts.map((savedShortcut) => (

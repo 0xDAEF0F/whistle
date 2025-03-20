@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Shortcuts from "./Shortcuts";
 import MessageDisplay from "./MessageDisplay";
+import "./App.css";
 
 function App() {
   const [messages, setMessages] = useState<string[]>([]);
@@ -10,8 +11,8 @@ function App() {
   };
 
   return (
-    <div style={{ padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
-      <h1>Global Shortcuts Demo</h1>
+    <div style={{ padding: "0px 20px", maxWidth: "800px", margin: "0 auto" }}>
+      <h1>Shortcuts</h1>
       <div style={{ marginBottom: "20px" }}>
         <p>
           Register global shortcuts that will work even when the app is in the

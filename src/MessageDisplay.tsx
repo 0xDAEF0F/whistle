@@ -10,9 +10,10 @@ export default function MessageDisplay({ messages }: MessageDisplayProps) {
         padding: "10px",
         border: "1px solid #ccc",
         borderRadius: "4px",
-        backgroundColor: "#f5f5f5",
+        backgroundColor: "#e8e8e8",
         maxHeight: "200px",
         overflow: "auto",
+        color: "black",
       }}
     >
       <h3 style={{ margin: "0 0 10px 0" }}>Messages:</h3>
