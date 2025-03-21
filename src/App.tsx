@@ -16,12 +16,12 @@ function App() {
     })();
   }, []);
 
-  const handleMessage = (message: string) => {
+  const handleKeyUpDownMsg = (message: string) => {
     setMessages((prev) => [message, ...prev].slice(0, 10));
   };
 
   return (
-    <div style={{ padding: "0px 20px", maxWidth: "800px", margin: "0 auto" }}>
+    <div className="mt-5 max-w-[800px] mx-auto space-y-3">
       <h1 className="text-2xl font-bold text-center">Shortcuts</h1>
       <div className="mb-5">
         <p>
@@ -31,21 +31,30 @@ function App() {
       </div>
 
       <div
+        className="space-y-1"
         style={{
           border: "1px solid #ddd",
           padding: "20px",
           borderRadius: "8px",
         }}
       >
-        <h2>Current Shortcuts</h2>
-        {Object.entries(shortcuts).map(([key, value]) => (
-          <div key={key}>
-            <span>{key}: </span>
-            <span>{value}</span>
-          </div>
-        ))}
+        <h2 className="text-md font-bold">
+          Current Shortcuts{" "}
+          <span className="font-semibold text-sm">
+            (Override shortcuts by setting a new shortcut in the input below)
+          </span>
+        </h2>
+        <ul className="list-disc list-inside">
+          {Object.entries(shortcuts).map(([key, value]) => (
+            <li className="flex items-center gap-x-2">
+              <span className="">- {key}: </span>
+              <span>{value}</span>
+            </li>
+          ))}
+        </ul>
       </div>
       <ShortcutInput
+        handleKeyUpDownMsg={handleKeyUpDownMsg}
         onShortcutRegistered={() => {
           getShortcuts().then((shortcuts) => {
             setShortcuts(shortcuts);

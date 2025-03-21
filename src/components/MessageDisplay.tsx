@@ -16,11 +16,11 @@ export default function MessageDisplay({ messages }: MessageDisplayProps) {
         color: "black",
       }}
     >
-      <h3 style={{ margin: "0 0 10px 0" }}>Messages:</h3>
+      <h3 className="text-md font-bold">Key presses:</h3>
       {messages.length === 0 ? (
-        <p>No messages yet</p>
+        <p>No key presses yet</p>
       ) : (
-        <ul style={{ margin: 0, padding: "0 0 0 20px" }}>
+        <ul className="list-disc list-inside">
           {messages.map((message, index) => (
             <li key={index}>{message}</li>
           ))}
