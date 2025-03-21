@@ -4856,6 +4856,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-fs"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1a1edf18000f02903a7c2e5997fb89aca455ecbc0acc15c6535afbb883be223"
+dependencies = [
+ "anyhow",
+ "dunce",
+ "glob",
+ "percent-encoding",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "tauri",
+ "tauri-plugin",
+ "tauri-utils",
+ "thiserror 2.0.12",
+ "toml",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "tauri-plugin-global-shortcut"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5831,6 +5854,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",
+ "tauri-plugin-fs",
  "tauri-plugin-global-shortcut",
  "tauri-plugin-log",
  "tauri-plugin-notification",

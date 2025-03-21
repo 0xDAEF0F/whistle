@@ -62,6 +62,7 @@ fn parse_shortcuts_config() -> Result<ShortcutsConfig> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
@@ -80,6 +81,10 @@ fn main() {
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::default()
                         .with_handler(move |app, shortcut, event| {
+                            if event.state() == ShortcutState::Pressed {
+                                log::info!("Shortcut triggered: {:?}", shortcut);
+                            }
+
                             if shortcut == &toggle_recording_shortcut
                                 && event.state() == ShortcutState::Pressed
                             {

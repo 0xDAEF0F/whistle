@@ -2,9 +2,14 @@ import { useState } from "react";
 import Shortcuts from "./Shortcuts";
 import MessageDisplay from "./MessageDisplay";
 import "./App.css";
+import { getShortcuts } from "./utils/shortcuts";
 
 function App() {
   const [messages, setMessages] = useState<string[]>([]);
+
+  getShortcuts().then((shortcuts) => {
+    console.log(shortcuts);
+  });
 
   const handleMessage = (message: string) => {
     setMessages((prev) => [message, ...prev].slice(0, 50)); // Keep last 50 messages
