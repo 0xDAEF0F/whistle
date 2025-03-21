@@ -1,29 +1,23 @@
-# Transcribe App
+# Whistle
 
 ## Overview
 
-The Transcribe App is a simple yet powerful application designed to transcribe audio to text efficiently. Built with modern technologies, it offers a seamless experience for users who need accurate and quick transcription services.
+Whistle is a simple yet powerful application designed to transcribe audio to text efficiently. Built
+with modern technologies like `fast-whisper` and `tauri`, it offers a seamless experience for users
+who need accurate and quick transcription services.
 
 ## Features
 
-- **Audio Transcription**: Convert audio files into text with high accuracy.
-- **Cross-Platform Support**: Available on macOS with plans for other platforms.
-- **User-Friendly Interface**: Easy to navigate and use.
-- **Clipboard Management**: Integrated clipboard manager for easy text handling.
-- **Notifications**: Get notified upon transcription completion.
-
-## Technologies Used
-
-- **Rust**: The core of the application is built using Rust, ensuring performance and safety.
-- **Tauri**: Utilized for building the desktop application, providing a lightweight and secure environment.
-- **Tokio**: Asynchronous runtime for handling concurrent tasks.
-- **Device Query and Enigo**: For interacting with device inputs.
+- **Audio Transcription**: Convert audio into text with high accuracy.
+- **Text Polishing**: Automatically polish text by passing it through deepseekV3 to provide more
+  context to your profile.
 
 ## Installation
 
 ### Prerequisites
 
-- **Rust**: Ensure you have Rust installed. You can download it from [rust-lang.org](https://www.rust-lang.org/).
+- **Rust**: Ensure you have Rust installed. You can download it from
+  [rust-lang.org](https://www.rust-lang.org/).
 - **Tauri CLI**: Install Tauri CLI by running:
   ```bash
   cargo install tauri-cli
