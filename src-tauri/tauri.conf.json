@@ -22,6 +22,8 @@
     ],
     "security": {
       "csp": null,
+      // if capabilities is empty it means all capabilities
+      // are enabled/allowed
       "capabilities": []
     }
   },

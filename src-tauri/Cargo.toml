@@ -6,13 +6,14 @@ authors = ["alex t. <aletapia@proton.me>"]
 edition = "2024"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = ["config-json5"] }
 
 [dependencies]
 tauri = { version = "2", features = [
     "macos-private-api",
     "tray-icon",
     "image-png",
+    "config-json5",
 ] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
