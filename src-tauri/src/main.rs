@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use colored::*;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs::read_to_string;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -36,7 +36,45 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
-#[derive(Debug, Deserialize)]
+#[tauri::command]
+fn assign_shortcut(app_handle: AppHandle, name: &str, shortcut: &str) {
+    if name != "toggle-recording" && name != "cleanse-clipboard" {
+        return;
+    }
+
+    let shortcut = Shortcut::from_str(shortcut).unwrap();
+
+    if let Ok(old_shortcuts) = parse_shortcuts_config() {
+        if name == "toggle-recording" {
+            _ = app_handle
+                .global_shortcut()
+                .unregister(old_shortcuts.toggle_recording);
+        } else if name == "cleanse-clipboard" {
+            _ = app_handle
+                .global_shortcut()
+                .unregister(old_shortcuts.cleanse_clipboard);
+        }
+    }
+
+    // register the new shortcut
+    _ = app_handle.global_shortcut().register(shortcut);
+
+    // update the config
+    let shortcuts_config = app_handle.state::<Mutex<ShortcutsConfig>>();
+    let mut shortcuts_config = shortcuts_config.lock().unwrap();
+    if name == "toggle-recording" {
+        shortcuts_config.toggle_recording = shortcut;
+    } else if name == "cleanse-clipboard" {
+        shortcuts_config.cleanse_clipboard = shortcut;
+    }
+
+    // write the new config to disk
+    let config_dir = dirs::home_dir().unwrap().join(".config/whistle/shortcuts.json");
+    let file_contents = serde_json::to_string(&shortcuts_config.clone()).unwrap();
+    std::fs::write(config_dir, file_contents).unwrap();
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 struct ShortcutsConfig {
     toggle_recording: Shortcut,
     cleanse_clipboard: Shortcut,
@@ -73,19 +111,20 @@ fn main() {
         .setup(|app| {
             #[cfg(desktop)]
             {
-                let ShortcutsConfig {
-                    toggle_recording: toggle_recording_shortcut,
-                    cleanse_clipboard: cleanse_clipboard_shortcut,
-                } = parse_shortcuts_config().unwrap_or_default();
+                let shortcuts_config = parse_shortcuts_config().unwrap_or_default();
+                app.manage(Mutex::new(shortcuts_config));
 
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::default()
                         .with_handler(move |app, shortcut, event| {
+                            let shortcuts_config = app.state::<Mutex<ShortcutsConfig>>();
+                            let shortcuts_config = shortcuts_config.lock().unwrap();
+
                             if event.state() == ShortcutState::Pressed {
                                 log::info!("Shortcut triggered: {:?}", shortcut);
                             }
 
-                            if shortcut == &toggle_recording_shortcut
+                            if shortcut == &shortcuts_config.toggle_recording
                                 && event.state() == ShortcutState::Pressed
                             {
                                 log::info!(
@@ -94,7 +133,7 @@ fn main() {
                                 toggle_recording(app.clone(), false);
                             }
                             // Check if the shortcut matches F20
-                            else if shortcut == &cleanse_clipboard_shortcut
+                            else if shortcut == &shortcuts_config.cleanse_clipboard
                                 && event.state() == ShortcutState::Pressed
                             {
                                 log::info!("F20 shortcut triggered - Polish Clipboard");
@@ -104,8 +143,8 @@ fn main() {
                         .build(),
                 )?;
                 app.global_shortcut().register_multiple([
-                    toggle_recording_shortcut,
-                    cleanse_clipboard_shortcut,
+                    shortcuts_config.toggle_recording,
+                    shortcuts_config.cleanse_clipboard,
                 ])?;
                 log::info!("Registered global shortcuts");
             }
@@ -231,7 +270,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, assign_shortcut])
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
