@@ -1,13 +1,17 @@
 import { useState } from "react";
 import Shortcuts from "./Shortcuts";
 import MessageDisplay from "./MessageDisplay";
-import "./App.css";
 import { getShortcuts } from "./utils/shortcuts";
+import "./App.css";
 
 function ShortcutInput() {
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
   const [isSettingShortcut, setIsSettingShortcut] = useState(false);
+
+  const [selectedShortcut, setSelectedShortcut] = useState<string>("");
+
+  // console.log({ selectedShortcut });
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     e.preventDefault();
@@ -49,18 +53,23 @@ function ShortcutInput() {
       <input
         type="text"
         value={text}
-        onChange={(e) => {
-          console.log(e.target.value);
-        }}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
       />
-      <div>
-        Keys pressed: {pressedKeys.size} ({text})
-      </div>
+      <select
+        name="shortcut-type"
+        id="shortcut-type"
+        value={selectedShortcut}
+        onChange={(e) => setSelectedShortcut(e.target.value)}
+      >
+        <option value="">Select shortcut</option>
+        <option value="toggle-recording">Toggle recording</option>
+        <option value="cleanse-clipboard">Cleanse clipboard</option>
+      </select>
       <button
         onClick={() => {
-          console.log(pressedKeys);
+          console.log(`selectedShortcut: ${selectedShortcut}`);
+          console.log(`savedKeys: ${Array.from(savedKeys)}`);
         }}
       >
         Register
@@ -73,7 +82,7 @@ function App() {
   const [messages, setMessages] = useState<string[]>([]);
 
   getShortcuts().then((shortcuts) => {
-    console.log(shortcuts);
+    // console.log(shortcuts);
   });
 
   const handleMessage = (message: string) => {

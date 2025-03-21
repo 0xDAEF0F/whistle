@@ -1,6 +1,7 @@
 # Todos
 
 - [ ] Configure a max duration for the recording.
+- [ ] Translation to english.
 - [ ] Change the idle icon on the tray.
 - [ ] Map the hotkeys to the actions.
 - [ ] Add recording time to the tray icon.
