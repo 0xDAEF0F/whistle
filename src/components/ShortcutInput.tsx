@@ -79,7 +79,10 @@ export function ShortcutInput({
         </div>
         <div>
           <button
-            className=""
+            disabled={selectedShortcut === ""}
+            className={`disabled:opacity-50 ${
+              selectedShortcut === "" ? "hover:border-transparent" : "" // not working
+            }`}
             onClick={() => {
               invoke("assign_shortcut", {
                 name: selectedShortcut,
@@ -94,8 +97,13 @@ export function ShortcutInput({
                     }
                   })
                   .join("+"),
-              });
-              onShortcutRegistered();
+              })
+                .then(() => {
+                  onShortcutRegistered();
+                })
+                .catch((err) => {
+                  console.error(err);
+                });
             }}
           >
             Register

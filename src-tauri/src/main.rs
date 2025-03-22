@@ -9,7 +9,7 @@ mod transcribe_app_logger;
 mod transcribe_client;
 mod transcribe_icon;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use colored::*;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
@@ -37,12 +37,14 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-fn assign_shortcut(app_handle: AppHandle, name: &str, shortcut: &str) {
+fn assign_shortcut(app_handle: AppHandle, name: &str, shortcut: &str) -> String {
     if name != "toggle-recording" && name != "cleanse-clipboard" {
-        return;
+        return "Invalid shortcut name".into();
     }
 
-    let shortcut = Shortcut::from_str(shortcut).unwrap();
+    let Ok(shortcut) = Shortcut::from_str(shortcut) else {
+        return "Invalid shortcut".into();
+    };
 
     if let Ok(old_shortcuts) = parse_shortcuts_config() {
         if name == "toggle-recording" {
@@ -54,6 +56,8 @@ fn assign_shortcut(app_handle: AppHandle, name: &str, shortcut: &str) {
                 .global_shortcut()
                 .unregister(old_shortcuts.cleanse_clipboard);
         }
+    } else {
+        return "Failed to parse shortcuts config".into();
     }
 
     // register the new shortcut
@@ -72,6 +76,8 @@ fn assign_shortcut(app_handle: AppHandle, name: &str, shortcut: &str) {
     let config_dir = dirs::home_dir().unwrap().join(".config/whistle/shortcuts.json");
     let file_contents = serde_json::to_string(&shortcuts_config.clone()).unwrap();
     std::fs::write(config_dir, file_contents).unwrap();
+
+    "".into()
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy)]
@@ -111,7 +117,27 @@ fn main() {
         .setup(|app| {
             #[cfg(desktop)]
             {
-                let shortcuts_config = parse_shortcuts_config().unwrap_or_default();
+                let shortcuts_config = {
+                    if let Ok(shortcuts_config) = parse_shortcuts_config() {
+                        shortcuts_config
+                    } else {
+                        let whistle_dir =
+                            dirs::home_dir().unwrap().join(".config/whistle");
+
+                        // create dirs if they don't exist
+                        std::fs::create_dir_all(&whistle_dir).unwrap();
+
+                        let shortcuts_config = ShortcutsConfig::default();
+
+                        let file_contents =
+                            serde_json::to_string(&shortcuts_config).unwrap();
+                        std::fs::write(whistle_dir.join("shortcuts.json"), file_contents)
+                            .unwrap();
+
+                        shortcuts_config
+                    }
+                };
+
                 app.manage(Mutex::new(shortcuts_config));
 
                 app.handle().plugin(

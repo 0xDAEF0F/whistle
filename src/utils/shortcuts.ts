@@ -1,4 +1,3 @@
-import { register, unregister } from "@tauri-apps/plugin-global-shortcut";
 import { readTextFile, BaseDirectory } from "@tauri-apps/plugin-fs";
 
 export async function getShortcuts(): Promise<Record<string, string>> {

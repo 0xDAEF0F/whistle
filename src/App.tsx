@@ -21,7 +21,7 @@ function App() {
   };
 
   return (
-    <div className="mt-5 max-w-[800px] mx-auto space-y-3">
+    <div className="mt-5 max-w-[800px] mx-auto space-y-3 px-5">
       <h1 className="text-2xl font-bold text-center">Shortcuts</h1>
       <div className="mb-5">
         <p>
