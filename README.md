@@ -1,58 +1,73 @@
 # Whistle
 
-## Overview
-
-Whistle is a simple yet powerful application designed to transcribe audio to text efficiently. Built
-with modern technologies like `fast-whisper` and `tauri`, it offers a seamless experience for users
-who need accurate and quick transcription services.
+Whistle is a desktop application that efficiently transcribes audio to text and polishes text
+through AI. Perfect for note-taking, content creation, and accessibility.
 
 ## Features
 
-- **Audio Transcription**: Convert audio into text with high accuracy.
-- **Text Polishing**: Automatically polish text by passing it through deepseekV3 to provide more
-  context to your profile.
+- **Audio Transcription**: Quickly convert speech to text with high accuracy using fast-whisper
+- **Text Polishing**: Clean up transcribed text using DeepSeek V3 for better readability
+- **Global Shortcuts**: Control recording and text processing even when the app is in background
+- **System Tray Integration**: Access functionality quickly from your system tray
+- **Clipboard Integration**: Seamlessly work with your clipboard content
 
 ## Installation
 
-### Prerequisites
+### Download
 
-- **Rust**: Ensure you have Rust installed. You can download it from
-  [rust-lang.org](https://www.rust-lang.org/).
-- **Tauri CLI**: Install Tauri CLI by running:
-  ```bash
-  cargo install tauri-cli
-  ```
+Download the latest release from the [Releases](https://github.com/yourusername/whistle/releases)
+page.
 
-### Steps
+### Build from Source
 
-1. **Clone the Repository**:
+If you prefer to build from source:
 
-   ```bash
-   git clone https://github.com/yourusername/transcribe-app.git
-   cd transcribe-app/src-tauri
-   ```
+1. **Prerequisites**:
 
-2. **Build the Application**:
+   - Rust and Cargo
+   - Node.js and npm/yarn
+
+2. **Setup**:
 
    ```bash
-   cargo tauri build
-   ```
+   # Clone the repository
+   git clone https://github.com/yourusername/whistle.git
+   cd whistle
 
-3. **Run the Application**:
-   ```bash
-   cargo tauri dev
+   # Install dependencies
+   npm install
+
+   # Run in development mode
+   npm run tauri dev
+
+   # Build for production
+   npm run tauri build
    ```
 
 ## Usage
 
-1. **Launch the Application**: After building, run the application using the command above.
-2. **Start Transcription**: Click on the 'Transcribe' button to begin the process.
-3. **View Results**: Once completed, the transcribed text will be displayed on the screen.
-4. **Copy to Clipboard**: Use the clipboard manager to copy the text for further use.
+### Basic Controls
 
-## Contributing
+1. **Start/Stop Recording**: Press `Cmd+Option+R` (Mac) or `Ctrl+Alt+R` (Windows/Linux)
+2. **Polish Clipboard Text**: Press `Cmd+Option+C` (Mac) or `Ctrl+Alt+C` (Windows/Linux)
+3. **Access Menu**: Right-click on the system tray icon
 
-We welcome contributions! Please fork the repository and submit a pull request for any improvements or bug fixes.
+### Customizing Shortcuts
+
+1. Open the application window
+2. Use the shortcut configuration panel to set your preferred key combinations
+
+### Configuration
+
+Settings are stored in `~/.config/whistle/` directory:
+
+- `shortcuts.json`: Contains your custom keyboard shortcuts
+
+## Troubleshooting
+
+- **No audio recording**: Ensure microphone permissions are granted in system settings
+- **Transcription errors**: Try speaking more clearly or in a quieter environment
+- **Shortcut conflicts**: Change shortcuts if they conflict with other applications
 
 ## License
 
@@ -60,4 +75,4 @@ This project is licensed under the MIT License.
 
 ## Contact
 
-For any inquiries or support, please contact alex t. at [aletapia@proton.me](mailto:aletapia@proton.me).
+For support or suggestions, contact alex t. at [aletapia@proton.me](mailto:aletapia@proton.me).

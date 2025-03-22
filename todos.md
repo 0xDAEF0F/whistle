@@ -11,3 +11,4 @@
 - [ ] Add a sound to notify when transcription is done and in clipboard.
 - [ ] Support other media players other than Spotify.
 - [ ] Make a detailed monitoring with tokio to analyze performance.
+- [ ] Add the release stuff to github.
