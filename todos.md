@@ -1,6 +1,7 @@
 # Todos
 
 - [ ] Configure a max duration for the recording.
+- [ ] Add a reload config button to the tray icon.
 - [ ] Modify the logger formatting to be more compact and have colors.
 - [ ] Translation to english.
 - [ ] Be able to clear shortcuts, too.
