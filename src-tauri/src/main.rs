@@ -1,108 +1,34 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_recorder;
+mod commands;
 mod constants;
 mod enigo_instance;
 mod local_task_handler;
 mod notifications;
+mod shortcuts;
 mod transcribe_app_logger;
 mod transcribe_client;
 mod transcribe_icon;
 
-use anyhow::{Context, Result, bail};
+use anyhow::Context;
 use colored::*;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
-use serde::{Deserialize, Serialize};
-use std::fs::read_to_string;
-use std::str::FromStr;
+use shortcuts::{ShortcutsConfig, get_or_create_shortcuts_config};
 use std::sync::{Arc, Mutex};
 use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,
     menu::{MenuBuilder, MenuItem},
-    path::{BaseDirectory, PathResolver},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
 use tauri_plugin_clipboard_manager::ClipboardExt;
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[tauri::command]
-fn assign_shortcut(app_handle: AppHandle, name: &str, shortcut: &str) -> String {
-    if name != "toggle-recording" && name != "cleanse-clipboard" {
-        return "Invalid shortcut name".into();
-    }
-
-    let Ok(shortcut) = Shortcut::from_str(shortcut) else {
-        return "Invalid shortcut".into();
-    };
-
-    if let Ok(old_shortcuts) = parse_shortcuts_config() {
-        if name == "toggle-recording" {
-            _ = app_handle
-                .global_shortcut()
-                .unregister(old_shortcuts.toggle_recording);
-        } else if name == "cleanse-clipboard" {
-            _ = app_handle
-                .global_shortcut()
-                .unregister(old_shortcuts.cleanse_clipboard);
-        }
-    } else {
-        return "Failed to parse shortcuts config".into();
-    }
-
-    // register the new shortcut
-    _ = app_handle.global_shortcut().register(shortcut);
-
-    // update the config
-    let shortcuts_config = app_handle.state::<Mutex<ShortcutsConfig>>();
-    let mut shortcuts_config = shortcuts_config.lock().unwrap();
-    if name == "toggle-recording" {
-        shortcuts_config.toggle_recording = shortcut;
-    } else if name == "cleanse-clipboard" {
-        shortcuts_config.cleanse_clipboard = shortcut;
-    }
-
-    // write the new config to disk
-    let config_dir = dirs::home_dir().unwrap().join(".config/whistle/shortcuts.json");
-    let file_contents = serde_json::to_string(&shortcuts_config.clone()).unwrap();
-    std::fs::write(config_dir, file_contents).unwrap();
-
-    "".into()
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
-struct ShortcutsConfig {
-    toggle_recording: Shortcut,
-    cleanse_clipboard: Shortcut,
-}
-
-impl Default for ShortcutsConfig {
-    fn default() -> Self {
-        Self {
-            toggle_recording: Shortcut::from_str("CmdOrCtrl+Option+R").unwrap(),
-            cleanse_clipboard: Shortcut::from_str("CmdOrCtrl+Option+C").unwrap(),
-        }
-    }
-}
-
-fn parse_shortcuts_config() -> Result<ShortcutsConfig> {
-    let config_dir = dirs::home_dir()
-        .context("Could not find home directory")?
-        .join(".config/whistle/shortcuts.json");
-    let file_contents = read_to_string(config_dir)?;
-    let config: ShortcutsConfig = serde_json::from_str(&file_contents)?;
-    Ok(config)
-}
 
 fn main() {
     tauri::Builder::default()
@@ -117,29 +43,8 @@ fn main() {
         .setup(|app| {
             #[cfg(desktop)]
             {
-                let shortcuts_config = {
-                    if let Ok(shortcuts_config) = parse_shortcuts_config() {
-                        shortcuts_config
-                    } else {
-                        let whistle_dir =
-                            dirs::home_dir().unwrap().join(".config/whistle");
-
-                        // create dirs if they don't exist
-                        std::fs::create_dir_all(&whistle_dir).unwrap();
-
-                        let shortcuts_config = ShortcutsConfig::default();
-
-                        let file_contents =
-                            serde_json::to_string(&shortcuts_config).unwrap();
-                        std::fs::write(whistle_dir.join("shortcuts.json"), file_contents)
-                            .unwrap();
-
-                        shortcuts_config
-                    }
-                };
-
+                let shortcuts_config = get_or_create_shortcuts_config()?;
                 app.manage(Mutex::new(shortcuts_config));
-
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::default()
                         .with_handler(move |app, shortcut, event| {
@@ -296,7 +201,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![greet, assign_shortcut])
+        .invoke_handler(tauri::generate_handler![commands::assign_shortcut])
         .plugin(tauri_plugin_clipboard_manager::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
