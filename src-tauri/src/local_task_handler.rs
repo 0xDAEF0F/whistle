@@ -2,12 +2,17 @@ use crate::{
     audio_recorder::AudioRecorder,
     enigo_instance::EnigoInstance,
     notifications::{AppNotifications, Notification},
+    transcribe_icon::{Icon, TranscribeIcon},
 };
 use anyhow::Result;
+use log::Log;
 use std::{cell::RefCell, rc::Rc};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::{
-    sync::{mpsc, oneshot},
+    sync::{
+        mpsc::{self, Sender},
+        oneshot,
+    },
     task::LocalSet,
 };
 
@@ -16,6 +21,7 @@ pub enum Task {
     ToggleRecording(oneshot::Sender<Vec<u8>>),
     PasteFromClipboard,
     UndoText(oneshot::Sender<()>),
+    CancelRecording,
 }
 
 /// - Instantiates its own tokio runtime
@@ -42,6 +48,7 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
             let enigo = Rc::clone(&enigo);
             let audio_recorder = Rc::clone(&audio_recorder);
             let media_manager = Rc::clone(&media_manager);
+            let app_handle = app_handle.clone();
             tokio::task::spawn_local(async move {
                 match task {
                     Task::ToggleRecording(tx_recording) => {
@@ -52,7 +59,9 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
 
                         if !recorder.is_recording {
                             media_manager.pause_spotify();
-                            if let Err(e) = recorder.start_recording() {
+                            if let Err(e) = recorder.start_recording(
+                                app_handle.state::<Sender<Task>>().clone(),
+                            ) {
                                 log::error!("Failed to start recording: {}", e);
                                 recorder.reset();
                                 return;
@@ -79,6 +88,17 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
                     Task::UndoText(tx_undo) => {
                         enigo.borrow_mut().undo_text().unwrap();
                         tx_undo.send(()).unwrap();
+                    }
+                    Task::CancelRecording => {
+                        let mut recorder = audio_recorder.borrow_mut();
+                        if recorder.stop_recording_and_get_bytes().is_none() {
+                            log::error!("Failed to stop recording");
+                            return;
+                        }
+                        let icon = app_handle.state::<TranscribeIcon>();
+                        icon.change_icon(Icon::Default);
+                        AppNotifications::new(&app_handle)
+                            .notify(Notification::CancelledSilence);
                     }
                 }
             });
@@ -110,7 +130,7 @@ impl MediaManager {
         .args(["-e", "tell application \"System Events\" to (name of processes) contains \"Spotify\""])
         .output()?;
         let is_running = String::from_utf8(output.stdout)?.trim() == "true";
-        
+
         if !is_running {
             return Ok(());
         }

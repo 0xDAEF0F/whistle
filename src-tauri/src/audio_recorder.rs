@@ -1,3 +1,4 @@
+use crate::{local_task_handler::Task, toggle_recording};
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use cpal::{
@@ -5,14 +6,20 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 use hound::{WavSpec, WavWriter};
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+use tauri::State;
 use tempfile::NamedTempFile;
+use tokio::sync::mpsc::Sender;
 
 pub struct AudioRecorder {
     stream: Option<Stream>,
     sample_rate: Option<u32>,
     channels: Option<u16>,
     samples: Arc<Mutex<Vec<i16>>>,
+    last_sound_time: Arc<Mutex<Option<Instant>>>,
     pub is_recording: bool,
 }
 
@@ -23,6 +30,7 @@ impl AudioRecorder {
             sample_rate: None,
             channels: None,
             samples: Arc::new(Mutex::new(Vec::new())),
+            last_sound_time: Arc::new(Mutex::new(None)),
             is_recording: false,
         }
     }
@@ -35,7 +43,7 @@ impl AudioRecorder {
         self.is_recording = false;
     }
 
-    pub fn start_recording(&mut self) -> Result<()> {
+    pub fn start_recording(&mut self, cancel_tx: State<Sender<Task>>) -> Result<()> {
         if self.is_recording {
             bail!("'AudioRecorder' is already recording, skipping...");
         }
@@ -61,20 +69,57 @@ impl AudioRecorder {
             self.is_recording
         );
 
+        let last_sound_time = self.last_sound_time.clone();
+        // Extract the inner Sender from State before cloning
+        let cancel_tx_clone = cancel_tx.inner().clone();
+
         let stream = device.build_input_stream(
             &config.into(),
             move |data: &[f32], _| {
                 let mut samples = samples_for_callback.lock().unwrap();
+                let mut sound_detected = false;
                 for &sample in data {
                     // Apply gain (increase volume) - adjust the multiplier as needed
                     let amplified_sample = sample * 3.0;
-
                     // Avoids distortion
                     let clamped_sample = amplified_sample.clamp(-1.0, 1.0);
-
                     // Convert f32 to i16
                     let sample = (clamped_sample * 32767.0) as i16;
+
+                    // println!("sample: {}", sample);
+                    if sample.abs() > 1000
+                    /* Some kind of sound threshold */
+                    {
+                        log::info!("Sound detected: {}", sample);
+                        sound_detected = true;
+                    }
+
                     samples.push(sample);
+                }
+
+                let mut last_sound_time = last_sound_time.lock().unwrap();
+
+                // this means it is the first batch being processed
+                if last_sound_time.is_none() {
+                    last_sound_time.replace(Instant::now());
+                    return;
+                }
+
+                if sound_detected {
+                    last_sound_time.replace(Instant::now());
+                    return;
+                }
+
+                // no sound was detected (stopping logic goes here)
+                let duration_silence = last_sound_time.unwrap().elapsed();
+
+                log::info!("Duration silence: {:?}", duration_silence);
+
+                if duration_silence > Duration::from_secs(8) {
+                    log::info!("No sound detected for 8 seconds, stopping recording");
+                    if let Err(e) = cancel_tx_clone.try_send(Task::CancelRecording) {
+                        log::error!("Failed to send CancelRecording task: {}", e);
+                    }
                 }
             },
             |err| log::error!("An error occurred on the audio stream: {}", err),
@@ -82,7 +127,6 @@ impl AudioRecorder {
         )?;
 
         stream.play()?;
-
         self.stream = Some(stream);
 
         Ok(())
@@ -102,6 +146,8 @@ impl AudioRecorder {
 
         // Drop the stream to stop recording
         self.stream = None;
+
+        *self.last_sound_time.lock().unwrap() = None;
 
         // Get the recorded samples
         let samples = self.samples.lock().unwrap().clone();

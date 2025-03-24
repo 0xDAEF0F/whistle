@@ -15,7 +15,7 @@ through AI. Perfect for note-taking, content creation, and accessibility.
 
 ### Download
 
-Download the latest release from the [Releases](https://github.com/yourusername/whistle/releases)
+Download the latest release from the [Releases](https://github.com/0xDAEF0F/whistle/releases)
 page.
 
 ### Build from Source
@@ -24,24 +24,23 @@ If you prefer to build from source:
 
 1. **Prerequisites**:
 
-   - Rust and Cargo
-   - Node.js and npm/yarn
+   - [Rust](https://www.rust-lang.org/tools/install)
+   - [Tauri CLI](https://v2.tauri.app/reference/cli/)
+   - [Node.js](https://nodejs.org/en/download)
+     Note: you can install pnpm with `npm install -g pnpm`
 
 2. **Setup**:
 
    ```bash
    # Clone the repository
-   git clone https://github.com/yourusername/whistle.git
+   git clone https://github.com/0xDAEF0F/whistle.git
    cd whistle
 
-   # Install dependencies
-   npm install
+   ### Build for production (this will run `pnpm install`, too)
+   cargo tauri build --release
 
    # Run in development mode
-   npm run tauri dev
-
-   # Build for production
-   npm run tauri build
+   cargo tauri dev
    ```
 
 ## Usage
@@ -59,9 +58,7 @@ If you prefer to build from source:
 
 ### Configuration
 
-Settings are stored in `~/.config/whistle/` directory:
-
-- `shortcuts.json`: Contains your custom keyboard shortcuts
+Shortcuts are stored in `~/.config/whistle/shortcuts.json`
 
 ## Troubleshooting
 
