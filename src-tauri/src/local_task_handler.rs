@@ -5,7 +5,6 @@ use crate::{
     transcribe_icon::{Icon, TranscribeIcon},
 };
 use anyhow::Result;
-use log::Log;
 use std::{cell::RefCell, rc::Rc};
 use tauri::{AppHandle, Manager};
 use tokio::{
@@ -99,6 +98,8 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
                         icon.change_icon(Icon::Default);
                         AppNotifications::new(&app_handle)
                             .notify(Notification::CancelledSilence);
+
+                        log::info!("Recording cancelled and icon changed to default");
                     }
                 }
             });

@@ -1,4 +1,4 @@
-use crate::{local_task_handler::Task, toggle_recording};
+use crate::local_task_handler::Task;
 use anyhow::{Context, Result, bail};
 use colored::Colorize;
 use cpal::{
@@ -86,11 +86,9 @@ impl AudioRecorder {
                     // Convert f32 to i16
                     let sample = (clamped_sample * 32767.0) as i16;
 
-                    // println!("sample: {}", sample);
-                    if sample.abs() > 1000
-                    /* Some kind of sound threshold */
-                    {
-                        log::info!("Sound detected: {}", sample);
+                    // 1000 is some arbitrary sound threshold
+                    if sample.abs() > 1000 {
+                        log::trace!("Sound detected with a sample of: {}", sample);
                         sound_detected = true;
                     }
 
@@ -112,8 +110,6 @@ impl AudioRecorder {
 
                 // no sound was detected (stopping logic goes here)
                 let duration_silence = last_sound_time.unwrap().elapsed();
-
-                log::info!("Duration silence: {:?}", duration_silence);
 
                 if duration_silence > Duration::from_secs(8) {
                     log::info!("No sound detected for 8 seconds, stopping recording");
