@@ -26,7 +26,7 @@ impl TranscribeIcon {
 
     fn change_icon_(&self, icon: Icon) -> Result<()> {
         let img = match icon {
-            Icon::Default => Image::from_bytes(include_bytes!("../icons/StoreLogo.png"))?,
+            Icon::Default => Image::from_bytes(include_bytes!("../icons/whistle.png"))?,
             Icon::Recording => {
                 Image::from_bytes(include_bytes!("../icons/recording-icon.png"))?
             }

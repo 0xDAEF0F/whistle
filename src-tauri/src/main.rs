@@ -41,6 +41,11 @@ fn main() {
         )
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // Disables the app icon in dock for macos and on the `cmd + tab`
+            // list for windows. Windows can still be opened.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             #[cfg(desktop)]
             {
                 let shortcuts_config = get_or_create_shortcuts_config()?;
@@ -79,10 +84,6 @@ fn main() {
                 ])?;
                 log::info!("Registered global shortcuts");
             }
-
-            // TODO: Add activation policy for macos for app run background
-            // #[cfg(target_os = "macos")]
-            // app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // Channel for sending tasks to the local task handler
             let (localtask_tx, localtask_rx) = mpsc::channel::<Task>(1);
