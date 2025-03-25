@@ -18,6 +18,19 @@ through AI. Perfect for note-taking, content creation, and accessibility.
 Download the latest release from the [Releases](https://github.com/0xDAEF0F/whistle/releases)
 page.
 
+Note: since the app is not signed, you will need to remove it from the
+quarantine list after downloading it and putting it in your applications folder.
+
+```bash
+xattr -dr com.apple.quarantine /Applications/whistle.app
+```
+
+if you are not sure about whether it is quarantined, you can run the following command (to verify)
+
+```bash
+xattr -l /Applications/whistle.app
+```
+
 ### Build from Source
 
 If you prefer to build from source:
