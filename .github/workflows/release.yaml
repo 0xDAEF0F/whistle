@@ -20,10 +20,10 @@ jobs:
             args: "--target aarch64-apple-darwin"
           - platform: "macos-latest" # for Intel based macs.
             args: "--target x86_64-apple-darwin"
-          - platform: "ubuntu-22.04" # for Tauri v1 you could replace this with ubuntu-20.04.
-            args: ""
-          - platform: "windows-latest"
-            args: ""
+        #   - platform: "ubuntu-22.04" # for Tauri v1 you could replace this with ubuntu-20.04.
+        #     args: ""
+        #   - platform: "windows-latest"
+        #     args: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -49,7 +49,7 @@ jobs:
         # You can remove the one that doesn't apply to your app to speed up the workflow a bit.
 
       - name: install frontend dependencies
-        run: yarn install # change this to npm, pnpm or bun depending on which one you use.
+        run: npm install -g pnpm && pnpm install
 
       - uses: tauri-apps/tauri-action@v0
         env:
