@@ -23,7 +23,7 @@ impl TranscribeClient {
     pub async fn fetch_transcription(&self, recording: Vec<u8>) -> Result<String> {
         let res = self
             .http_client
-            .post(format!("{API_BASE_URL}/transcribe"))
+            .post(format!("{API_BASE_URL}/transcribe-auto-detect"))
             .header("Content-Type", "audio/wav")
             .body(recording)
             .send()
