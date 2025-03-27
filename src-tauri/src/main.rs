@@ -1,9 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_recorder;
+mod media_manager;
 mod commands;
 mod constants;
-mod enigo_instance;
 mod local_task_handler;
 mod notifications;
 mod shortcuts;
@@ -38,7 +38,6 @@ fn main() {
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
-                .level_for("enigo", log::LevelFilter::Error)
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -68,7 +67,7 @@ fn main() {
                                 log::info!(
                                     "F19 shortcut triggered - Start/Stop Recording"
                                 );
-                                toggle_recording(app.clone(), false);
+                                toggle_recording(app.clone(), true);
                             }
                             // Check if the shortcut matches F20
                             else if shortcut == &shortcuts_config.cleanse_clipboard
@@ -151,6 +150,13 @@ fn main() {
         })
         .on_tray_icon_event(|app_handle, event| match event {
             TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Down,
+                ..
+            } => {
+                toggle_recording(app_handle.clone(), false);
+            }
+            TrayIconEvent::Click {
                 button: MouseButton::Right,
                 button_state: MouseButtonState::Down,
                 ..
@@ -159,13 +165,6 @@ fn main() {
                 if let Err(e) = app_handle.show_menu() {
                     log::error!("Failed to show menu: {}", e);
                 }
-            }
-            TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Down,
-                ..
-            } => {
-                toggle_recording(app_handle.clone(), false);
             }
             _ => {}
         })
@@ -269,7 +268,7 @@ pub fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
         if let Err(e) = tx_task.send(Task::PasteFromClipboard).await {
             log::error!("Failed to send 'PasteFromClipboard' task to channel: {}", e);
         } else {
-            log::info!("Successfully pasted text from clipboard");
+            log::info!("Sent PasteFromClipboard task to channel");
         }
         log::info!("exiting toggle recording function");
     });

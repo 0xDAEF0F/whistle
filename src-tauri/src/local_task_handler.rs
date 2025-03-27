@@ -1,11 +1,12 @@
 use crate::{
     audio_recorder::AudioRecorder,
-    enigo_instance::EnigoInstance,
+    media_manager::MediaManager,
     notifications::{AppNotifications, Notification},
     transcribe_icon::{Icon, TranscribeIcon},
 };
 use anyhow::Result;
-use std::{cell::RefCell, rc::Rc};
+use rdev::{Event, EventType, Key, listen, simulate};
+use std::{cell::RefCell, rc::Rc, thread::sleep};
 use tauri::{AppHandle, Manager};
 use tokio::{
     sync::{
@@ -23,7 +24,19 @@ pub enum Task {
     CancelRecording,
 }
 
-/// - Instantiates its own tokio runtime
+/// This should only be called on the main thread
+fn paste_from_clipboard() -> Result<()> {
+    simulate(&EventType::KeyPress(Key::MetaLeft))?;
+    sleep(std::time::Duration::from_millis(20));
+    simulate(&EventType::KeyPress(Key::KeyV))?;
+    sleep(std::time::Duration::from_millis(20));
+    simulate(&EventType::KeyRelease(Key::MetaLeft))?;
+    sleep(std::time::Duration::from_millis(20));
+    simulate(&EventType::KeyRelease(Key::KeyV))?;
+    Ok(())
+}
+
+/// Instantiates its own tokio runtime
 pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandle) {
     log::info!("Starting `run_local_task_handler`");
 
@@ -34,17 +47,9 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
     let local = LocalSet::new();
 
     local.spawn_local(async move {
-        let enigo = EnigoInstance::try_new();
-        if enigo.is_err() {
-            log::error!("Failed to create EnigoInstance");
-            AppNotifications::new(&app_handle).notify(Notification::AccessibilityError);
-            app_handle.exit(1);
-        }
-        let enigo = Rc::new(RefCell::new(enigo.unwrap()));
         let audio_recorder = Rc::new(RefCell::new(AudioRecorder::new()));
         let media_manager = Rc::new(RefCell::new(MediaManager::new()));
         while let Some(task) = rx.recv().await {
-            let enigo = Rc::clone(&enigo);
             let audio_recorder = Rc::clone(&audio_recorder);
             let media_manager = Rc::clone(&media_manager);
             let app_handle = app_handle.clone();
@@ -81,12 +86,14 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
                             log::error!("Failed to send recording to channel");
                         }
                     }
-                    Task::PasteFromClipboard => {
-                        enigo.borrow_mut().paste_from_clipboard().unwrap();
-                    }
-                    Task::UndoText(tx_undo) => {
-                        enigo.borrow_mut().undo_text().unwrap();
-                        tx_undo.send(()).unwrap();
+                    Task::PasteFromClipboard => match paste_from_clipboard() {
+                        Ok(()) => log::info!("Pasted from clipboard successfully"),
+                        Err(e) => log::error!("Failed to paste from clipboard: {}", e),
+                    },
+                    Task::UndoText(_tx_undo) => {
+                        unimplemented!(
+                            "UndoText task received through channel (not implemented)"
+                        );
                     }
                     Task::CancelRecording => {
                         let mut recorder = audio_recorder.borrow_mut();
@@ -106,68 +113,5 @@ pub fn run_local_task_handler(mut rx: mpsc::Receiver<Task>, app_handle: AppHandl
         }
     });
 
-    log::info!("Blocking on local task handler");
     rt.block_on(local);
-    log::info!("Local task handler completed");
-}
-
-struct MediaManager {
-    was_playing: bool,
-}
-
-impl MediaManager {
-    fn new() -> Self {
-        Self { was_playing: false }
-    }
-
-    pub fn pause_spotify(&mut self) {
-        if let Err(e) = self.pause_spotify_() {
-            log::error!("Failed to pause Spotify: {}", e);
-        }
-    }
-
-    fn pause_spotify_(&mut self) -> Result<()> {
-        let output = std::process::Command::new("osascript")
-        .args(["-e", "tell application \"System Events\" to (name of processes) contains \"Spotify\""])
-        .output()?;
-        let is_running = String::from_utf8(output.stdout)?.trim() == "true";
-
-        if !is_running {
-            return Ok(());
-        }
-
-        let output = std::process::Command::new("osascript")
-            .args(["-e", "tell application \"Spotify\" to player state"])
-            .output()?;
-        let is_playing = String::from_utf8(output.stdout)?.trim() == "playing";
-
-        if is_running && is_playing {
-            std::process::Command::new("osascript")
-                .args(["-e", "tell application \"Spotify\" to pause"])
-                .output()?;
-            self.was_playing = true;
-        }
-
-        Ok(())
-    }
-
-    pub fn play_spotify(&mut self) {
-        if let Err(e) = self.play_spotify_() {
-            log::error!("Failed to play Spotify: {}", e);
-        }
-    }
-
-    fn play_spotify_(&mut self) -> Result<()> {
-        if !self.was_playing {
-            return Ok(());
-        }
-
-        std::process::Command::new("osascript")
-            .args(["-e", "tell application \"Spotify\" to play"])
-            .output()?;
-
-        self.was_playing = false;
-
-        Ok(())
-    }
 }
