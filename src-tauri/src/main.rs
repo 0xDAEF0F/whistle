@@ -30,6 +30,8 @@ use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
 
+struct IsCleansing(bool);
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
@@ -140,7 +142,7 @@ fn main() {
             app.manage(localtask_tx)
                 .then(|| app.manage(transcribe_client))
                 .and_then(|_| app.manage(TranscribeIcon::new(tray_icon)).into())
-                .and_then(|_| app.manage(Arc::new(Mutex::new(false))).into())
+                .and_then(|_| app.manage(Mutex::new(IsCleansing(false))).into())
                 .context("Failed to manage app state")?;
 
             log::info!("Successfully managed app state");
@@ -291,13 +293,13 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
             return;
         }
 
-        let is_cleansing_m = app_handle.state::<Arc<Mutex<bool>>>();
+        let is_cleansing_m = app_handle.state::<Mutex<IsCleansing>>();
         let mut is_cleansing = is_cleansing_m.lock().unwrap();
-        if *is_cleansing {
+        if is_cleansing.0 {
             log::warn!("Already cleansing. Skipping.");
             return;
         }
-        *is_cleansing = true;
+        is_cleansing.0 = true;
         drop(is_cleansing);
 
         app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
@@ -315,7 +317,7 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
                 log::error!("Failed to clean transcription");
                 AppNotifications::new(&app_handle_).notify(Notification::ApiError);
                 app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
-                *app_handle_.state::<Arc<Mutex<bool>>>().lock().unwrap() = false;
+                app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
                 return;
             };
 
@@ -325,7 +327,7 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
 
             if !paste_from_clipboard {
                 AppNotifications::new(&app_handle_).notify(Notification::PolishSuccess);
-                *app_handle_.state::<Arc<Mutex<bool>>>().lock().unwrap() = false;
+                app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
                 app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
                 return;
             }
@@ -340,9 +342,7 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
             tx_task.send(Task::PasteFromClipboard).await.unwrap();
 
             app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
-
-            let is_cleansing = app_handle_.state::<Arc<Mutex<bool>>>();
-            *is_cleansing.lock().unwrap() = false;
+            app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
 
             log::info!("Cleansing complete. Set 'IsCleansing' to false");
         });
