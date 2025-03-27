@@ -3,8 +3,8 @@
 mod audio_recorder;
 mod commands;
 mod constants;
-mod enigo_instance;
 mod local_task_handler;
+mod media_manager;
 mod notifications;
 mod shortcuts;
 mod transcribe_app_logger;
@@ -16,7 +16,7 @@ use colored::*;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
 use shortcuts::{ShortcutsConfig, get_or_create_shortcuts_config};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,
@@ -30,13 +30,14 @@ use tokio::sync::{mpsc, oneshot};
 use transcribe_client::TranscribeClient;
 use transcribe_icon::{Icon, TranscribeIcon};
 
+struct IsCleansing(bool);
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Debug)
-                .level_for("enigo", log::LevelFilter::Error)
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
@@ -66,7 +67,7 @@ fn main() {
                                 log::info!(
                                     "F19 shortcut triggered - Start/Stop Recording"
                                 );
-                                toggle_recording(app.clone(), false);
+                                toggle_recording(app.clone(), true);
                             }
                             // Check if the shortcut matches F20
                             else if shortcut == &shortcuts_config.cleanse_clipboard
@@ -140,7 +141,7 @@ fn main() {
             app.manage(localtask_tx)
                 .then(|| app.manage(transcribe_client))
                 .and_then(|_| app.manage(TranscribeIcon::new(tray_icon)).into())
-                .and_then(|_| app.manage(Arc::new(Mutex::new(false))).into())
+                .and_then(|_| app.manage(Mutex::new(IsCleansing(false))).into())
                 .context("Failed to manage app state")?;
 
             log::info!("Successfully managed app state");
@@ -148,6 +149,13 @@ fn main() {
             Ok(())
         })
         .on_tray_icon_event(|app_handle, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Down,
+                ..
+            } => {
+                toggle_recording(app_handle.clone(), false);
+            }
             TrayIconEvent::Click {
                 button: MouseButton::Right,
                 button_state: MouseButtonState::Down,
@@ -157,13 +165,6 @@ fn main() {
                 if let Err(e) = app_handle.show_menu() {
                     log::error!("Failed to show menu: {}", e);
                 }
-            }
-            TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Down,
-                ..
-            } => {
-                toggle_recording(app_handle.clone(), false);
             }
             _ => {}
         })
@@ -267,7 +268,7 @@ pub fn toggle_recording(app_handle: AppHandle, paste_from_clipboard: bool) {
         if let Err(e) = tx_task.send(Task::PasteFromClipboard).await {
             log::error!("Failed to send 'PasteFromClipboard' task to channel: {}", e);
         } else {
-            log::info!("Successfully pasted text from clipboard");
+            log::info!("Sent PasteFromClipboard task to channel");
         }
         log::info!("exiting toggle recording function");
     });
@@ -291,13 +292,13 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
             return;
         }
 
-        let is_cleansing_m = app_handle.state::<Arc<Mutex<bool>>>();
+        let is_cleansing_m = app_handle.state::<Mutex<IsCleansing>>();
         let mut is_cleansing = is_cleansing_m.lock().unwrap();
-        if *is_cleansing {
+        if is_cleansing.0 {
             log::warn!("Already cleansing. Skipping.");
             return;
         }
-        *is_cleansing = true;
+        is_cleansing.0 = true;
         drop(is_cleansing);
 
         app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
@@ -315,7 +316,7 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
                 log::error!("Failed to clean transcription");
                 AppNotifications::new(&app_handle_).notify(Notification::ApiError);
                 app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
-                *app_handle_.state::<Arc<Mutex<bool>>>().lock().unwrap() = false;
+                app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
                 return;
             };
 
@@ -325,7 +326,7 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
 
             if !paste_from_clipboard {
                 AppNotifications::new(&app_handle_).notify(Notification::PolishSuccess);
-                *app_handle_.state::<Arc<Mutex<bool>>>().lock().unwrap() = false;
+                app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
                 app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
                 return;
             }
@@ -340,9 +341,7 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
             tx_task.send(Task::PasteFromClipboard).await.unwrap();
 
             app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
-
-            let is_cleansing = app_handle_.state::<Arc<Mutex<bool>>>();
-            *is_cleansing.lock().unwrap() = false;
+            app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
 
             log::info!("Cleansing complete. Set 'IsCleansing' to false");
         });
