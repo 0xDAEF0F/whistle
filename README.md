@@ -16,9 +16,10 @@ through AI. Perfect for note-taking, content creation, and accessibility.
 ### Download
 
 Download the latest release from the [Releases](https://github.com/0xDAEF0F/whistle/releases)
-page.
+page. If you are on macOS, you can download the `.dmg` file and double click on
+it to install and move it to your applications folder just like any other app. and also you
 
-Note: since the app is not signed, you will need to remove it from the
+Notes: since the app is not signed, you will need to remove it from the
 quarantine list after downloading it and putting it in your applications folder.
 
 ```bash
@@ -29,6 +30,13 @@ if you are not sure about whether it is quarantined, you can run the following c
 
 ```bash
 xattr -l /Applications/whistle.app
+```
+
+if you are having permission issues when reinstalling the app for the _second_
+time, run the following to reset permissions:
+
+```bash
+tccutil reset All com.whistle.app
 ```
 
 ### Build from Source
