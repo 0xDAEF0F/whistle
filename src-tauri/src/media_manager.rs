@@ -60,4 +60,3 @@ impl MediaManager {
         Ok(())
     }
 }
-

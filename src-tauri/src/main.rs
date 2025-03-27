@@ -1,10 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod audio_recorder;
-mod media_manager;
 mod commands;
 mod constants;
 mod local_task_handler;
+mod media_manager;
 mod notifications;
 mod shortcuts;
 mod transcribe_app_logger;
@@ -16,7 +16,7 @@ use colored::*;
 use local_task_handler::{Task, run_local_task_handler};
 use notifications::{AppNotifications, Notification};
 use shortcuts::{ShortcutsConfig, get_or_create_shortcuts_config};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tauri::{
     AppHandle, Manager,
     async_runtime::spawn,

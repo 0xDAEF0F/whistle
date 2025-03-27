@@ -5,7 +5,7 @@ use crate::{
     transcribe_icon::{Icon, TranscribeIcon},
 };
 use anyhow::Result;
-use rdev::{Event, EventType, Key, listen, simulate};
+use rdev::{EventType, Key, simulate};
 use std::{cell::RefCell, rc::Rc, thread::sleep};
 use tauri::{AppHandle, Manager};
 use tokio::{
