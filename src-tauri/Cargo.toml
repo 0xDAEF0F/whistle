@@ -1,5 +1,5 @@
 [package]
-name = "whisper-app"
+name = "whistle"
 version = "0.1.0"
 description = "A simple app to transcribe audio to text"
 authors = ["alex t. <aletapia@proton.me>"]
