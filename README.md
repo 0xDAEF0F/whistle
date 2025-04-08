@@ -1,4 +1,5 @@
 # Whistle
+[![Twitter Follow](https://img.shields.io/twitter/follow/Alex?style=social)](https://x.com/0xdaef0f)
 
 Whistle is a desktop application that efficiently transcribes audio to text and polishes text
 through AI. Perfect for note-taking, content creation, and accessibility.
