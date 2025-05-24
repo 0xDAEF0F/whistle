@@ -7,7 +7,6 @@ mod local_task_handler;
 mod media_manager;
 mod notifications;
 mod shortcuts;
-mod transcribe_app_logger;
 mod transcribe_client;
 mod transcribe_icon;
 
@@ -64,9 +63,7 @@ fn main() {
                             if shortcut == &shortcuts_config.toggle_recording
                                 && event.state() == ShortcutState::Pressed
                             {
-                                log::info!(
-                                    "F19 shortcut triggered - Start/Stop Recording"
-                                );
+                                log::info!("F19 shortcut triggered - Start/Stop Recording");
                                 toggle_recording(app.clone(), true);
                             }
                             // Check if the shortcut matches F20
@@ -127,7 +124,13 @@ fn main() {
                     None::<&str>,
                 )?)
                 .separator()
-                .item(&MenuItem::with_id(app, "quit", "Quit app", true, None::<&str>)?)
+                .item(&MenuItem::with_id(
+                    app,
+                    "quit",
+                    "Quit app",
+                    true,
+                    None::<&str>,
+                )?)
                 .build()?;
 
             let tray_icon = TrayIconBuilder::new()
@@ -301,7 +304,9 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
         is_cleansing.0 = true;
         drop(is_cleansing);
 
-        app_handle.state::<TranscribeIcon>().change_icon(Icon::Cleansing);
+        app_handle
+            .state::<TranscribeIcon>()
+            .change_icon(Icon::Cleansing);
 
         log::info!("Starting polish of: {}", clipboard_text.yellow());
 
@@ -311,11 +316,12 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
 
             AppNotifications::new(&app_handle_).notify(Notification::StartPolishing);
 
-            let Ok(cleansed_text) = client.clean_transcription(clipboard_text).await
-            else {
+            let Ok(cleansed_text) = client.clean_transcription(clipboard_text).await else {
                 log::error!("Failed to clean transcription");
                 AppNotifications::new(&app_handle_).notify(Notification::ApiError);
-                app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
+                app_handle_
+                    .state::<TranscribeIcon>()
+                    .change_icon(Icon::Default);
                 app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
                 return;
             };
@@ -327,7 +333,9 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
             if !paste_from_clipboard {
                 AppNotifications::new(&app_handle_).notify(Notification::PolishSuccess);
                 app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
-                app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
+                app_handle_
+                    .state::<TranscribeIcon>()
+                    .change_icon(Icon::Default);
                 return;
             }
 
@@ -340,7 +348,9 @@ pub fn cleanse_clipboard(app_handle: AppHandle, paste_from_clipboard: bool) {
 
             tx_task.send(Task::PasteFromClipboard).await.unwrap();
 
-            app_handle_.state::<TranscribeIcon>().change_icon(Icon::Default);
+            app_handle_
+                .state::<TranscribeIcon>()
+                .change_icon(Icon::Default);
             app_handle_.state::<Mutex<IsCleansing>>().lock().unwrap().0 = false;
 
             log::info!("Cleansing complete. Set 'IsCleansing' to false");

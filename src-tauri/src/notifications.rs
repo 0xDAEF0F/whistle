@@ -6,6 +6,7 @@ pub enum Notification {
     PolishSuccess,
     TranscribeSuccess, // when not pasting from clipboard
     ApiError,
+    #[allow(dead_code)]
     AccessibilityError,
     CancelledSilence,
 }
