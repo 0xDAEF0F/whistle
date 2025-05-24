@@ -1,9 +1,0 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-
-# Your rule content
-
-- [tauri.conf.json](mdc:src-tauri/tauri.conf.json) if capabilities is empty, i.e., [] that means all capabilities are enabled.
